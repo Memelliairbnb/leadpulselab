@@ -35,4 +35,5 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./
 
 ENV NODE_ENV=production
-CMD ["node", "workers/${WORKER_NAME}/dist/main.js"]
+ENV WORKER_NAME=${WORKER_NAME}
+CMD ["sh", "-c", "node workers/${WORKER_NAME}/dist/main.js"]

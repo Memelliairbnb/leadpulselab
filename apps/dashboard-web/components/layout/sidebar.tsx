@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { navItems } from './nav-items';
@@ -80,7 +81,8 @@ export function Sidebar() {
   return (
     <aside className="w-56 h-screen bg-surface-raised border-r border-border flex flex-col fixed left-0 top-0">
       <div className="px-5 py-5 border-b border-border">
-        <h1 className="text-sm font-semibold text-text-primary tracking-wide uppercase">
+        <h1 className="flex items-center gap-2 text-sm font-semibold text-text-primary tracking-wide uppercase">
+          <Image src="/logo.png" alt="LeadPulseLab" width={28} height={28} />
           LeadPulseLab
         </h1>
       </div>

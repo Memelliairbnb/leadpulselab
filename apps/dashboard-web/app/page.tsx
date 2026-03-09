@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect } from 'react';
 
 const industries = [
@@ -93,7 +94,8 @@ export default function HomePage() {
       {/* ── Navigation ── */}
       <nav className="fixed top-0 z-50 w-full border-b border-border bg-surface/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <span className="text-xl font-bold tracking-tight">
+          <span className="flex items-center gap-2 text-xl font-bold tracking-tight">
+            <Image src="/logo.png" alt="LeadPulseLab" width={32} height={32} />
             Lead<span className="text-accent">Pulse</span>Lab
           </span>
           <div className="hidden items-center gap-8 md:flex">
@@ -360,7 +362,8 @@ export default function HomePage() {
       <footer className="border-t border-border-subtle py-12">
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
-            <span className="text-lg font-bold tracking-tight">
+            <span className="flex items-center gap-2 text-lg font-bold tracking-tight">
+              <Image src="/logo.png" alt="LeadPulseLab" width={32} height={32} />
               Lead<span className="text-accent">Pulse</span>Lab
             </span>
             <div className="flex gap-8 text-sm text-text-muted">
