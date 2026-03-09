@@ -1,0 +1,131 @@
+import type { VerticalTemplateEntry } from './index';
+
+export const creditRepairTemplate: VerticalTemplateEntry = {
+  name: 'credit_repair',
+  displayName: 'Credit Repair & Financial Services',
+  industry: 'Financial Services',
+  description: 'For credit repair companies, funding brokers, and financial service providers helping people improve their credit and access funding.',
+  config: {
+    leadTypes: [
+      { name: 'credit_repair', displayName: 'Credit Repair', description: 'Person with credit issues, collections, charge-offs, low scores needing cleanup', priority: 10, color: '#EF4444' },
+      { name: 'personal_funding', displayName: 'Personal Funding', description: 'Person needing personal loans or lines of credit', priority: 8, color: '#F59E0B' },
+      { name: 'business_funding', displayName: 'Business Funding', description: 'Business owner needing capital but blocked by credit/profile issues', priority: 9, color: '#3B82F6' },
+      { name: 'mortgage_readiness', displayName: 'Mortgage Readiness', description: 'Person denied for mortgage or preparing to buy but credit is insufficient', priority: 9, color: '#8B5CF6' },
+      { name: 'realtor_referral', displayName: 'Realtor Referral', description: 'Real estate agent with clients who can\'t qualify due to credit', priority: 7, color: '#10B981' },
+      { name: 'broker_referral', displayName: 'Broker Referral', description: 'Mortgage broker with credit-challenged clients', priority: 7, color: '#06B6D4' },
+    ],
+    keywordCategories: [
+      {
+        name: 'Credit Pain',
+        keywords: [
+          { keyword: 'bad credit help', type: 'phrase' },
+          { keyword: 'fix my credit', type: 'phrase' },
+          { keyword: 'collections on my report', type: 'phrase' },
+          { keyword: 'charge-offs', type: 'phrase' },
+          { keyword: 'remove inquiries', type: 'phrase' },
+          { keyword: 'credit score too low', type: 'phrase' },
+          { keyword: 'credit repair near me', type: 'phrase' },
+        ],
+      },
+      {
+        name: 'Loan Denial',
+        keywords: [
+          { keyword: 'denied for loan', type: 'phrase' },
+          { keyword: 'denied for mortgage', type: 'phrase' },
+          { keyword: 'denied business loan', type: 'phrase' },
+          { keyword: 'get approved with bad credit', type: 'phrase' },
+          { keyword: 'low score home loan', type: 'phrase' },
+        ],
+      },
+      {
+        name: 'Funding Need',
+        keywords: [
+          { keyword: 'need business funding', type: 'phrase' },
+          { keyword: 'help qualify for funding', type: 'phrase' },
+          { keyword: 'preparing to buy a home but credit is bad', type: 'phrase' },
+        ],
+      },
+      {
+        name: 'Referral Signals',
+        keywords: [
+          { keyword: 'clients do not qualify because of credit', type: 'phrase' },
+          { keyword: 'mortgage clients need credit help', type: 'phrase' },
+          { keyword: 'business owner needs funding but profile not ready', type: 'phrase' },
+        ],
+      },
+      {
+        name: 'Hashtags',
+        keywords: [
+          { keyword: '#badcredit', type: 'hashtag' },
+          { keyword: '#creditrepair', type: 'hashtag' },
+          { keyword: '#fixmycredit', type: 'hashtag' },
+          { keyword: '#loanrejected', type: 'hashtag' },
+          { keyword: '#mortgagedenied', type: 'hashtag' },
+          { keyword: '#creditscore', type: 'hashtag' },
+          { keyword: '#businessfunding', type: 'hashtag' },
+          { keyword: '#fundinghelp', type: 'hashtag' },
+        ],
+      },
+    ],
+    scoringSignals: [
+      { signalKey: 'denied_loan', signalPattern: 'denied for loan|denied for mortgage|turned down|rejected', weight: 35, description: 'Directly mentions loan or mortgage denial' },
+      { signalKey: 'asked_for_help', signalPattern: 'help me|fix my|need help|how to|looking for', weight: 25, description: 'Actively asking for help' },
+      { signalKey: 'urgent_timeline', signalPattern: 'asap|urgent|quickly|fast|immediately|this month', weight: 20, description: 'Urgent need for resolution' },
+      { signalKey: 'professional_referral', signalPattern: 'realtor|broker|agent|loan officer|my clients', weight: 15, description: 'Professional with referral potential' },
+      { signalKey: 'credit_pain', signalPattern: 'collections|charge-off|late payments|inquiries|low score|bad credit', weight: 10, description: 'Specific credit pain terms' },
+      { signalKey: 'vague_finance', signalPattern: 'investment tips|stock market|crypto|savings account|retirement', weight: -20, description: 'General finance content, not credit pain' },
+    ],
+    outreachTemplates: [
+      {
+        name: 'Credit Repair First Contact',
+        leadTypeName: 'credit_repair',
+        channel: 'dm',
+        subject: null,
+        body: 'Hi — I came across your post about dealing with credit challenges. A lot of people don\'t realize those items can be disputed and removed with the right approach. We specialize in helping people clean up their credit profile so they can qualify for the funding and approvals they need. Happy to share how our review process works if you\'re interested.',
+        tone: 'warm',
+      },
+      {
+        name: 'Mortgage Readiness First Contact',
+        leadTypeName: 'mortgage_readiness',
+        channel: 'dm',
+        subject: null,
+        body: 'Hey — I noticed you mentioned being turned down for a mortgage due to credit. That\'s actually more common than you\'d think, and in most cases the profile can be improved faster than people expect. We help people get mortgage-ready by addressing the specific items holding their score back. Would you like to learn more about how it works?',
+        tone: 'warm',
+      },
+      {
+        name: 'Business Funding First Contact',
+        leadTypeName: 'business_funding',
+        channel: 'dm',
+        subject: null,
+        body: 'Hi — I saw your post about needing business capital but running into issues with your credit profile. We work with business owners to get their personal and business credit cleaned up so they can access real funding options. If you\'d like, I can walk you through what we typically see and how fast things can move.',
+        tone: 'warm',
+      },
+      {
+        name: 'Realtor Referral Partner',
+        leadTypeName: 'realtor_referral',
+        channel: 'dm',
+        subject: null,
+        body: 'Hey — I know how frustrating it is when buyers are excited but can\'t qualify because of credit issues. We partner with agents to help their clients get mortgage-ready faster. Our team handles the credit cleanup so your clients come back qualified. Want to chat about how we could work together?',
+        tone: 'professional',
+      },
+    ],
+    aiConfig: {
+      industryContext: 'We are a financial services company that helps people with credit repair, personal funding, business funding, mortgage readiness, and referral partnerships with real estate and mortgage professionals. We identify people publicly discussing credit challenges, loan denials, and funding needs.',
+      classificationInstructions: 'Pay special attention to signals of loan/mortgage denial, active credit disputes, collections or charge-offs mentioned, and professionals who work with clients needing credit help.',
+      exampleSignals: [
+        'I was denied for a mortgage because of my credit score',
+        'Does anyone know how to remove collections from my report?',
+        'My business loan was rejected, need help with credit',
+        'I have a client who wants to buy but their credit is too low',
+      ],
+      irrelevantSignals: [
+        'investment advice',
+        'stock tips',
+        'cryptocurrency',
+        'savings accounts',
+        'retirement planning',
+        'insurance quotes',
+      ],
+    },
+  },
+};

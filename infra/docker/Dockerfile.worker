@@ -1,0 +1,38 @@
+# Generic worker Dockerfile — pass WORKER_NAME as build arg
+# Usage: docker build --build-arg WORKER_NAME=ingestion-worker -f Dockerfile.worker .
+ARG WORKER_NAME
+
+FROM node:20-slim AS base
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
+COPY packages/db/package.json packages/db/
+COPY packages/types/package.json packages/types/
+COPY packages/queues/package.json packages/queues/
+COPY packages/observability/package.json packages/observability/
+COPY packages/utils/package.json packages/utils/
+COPY packages/ai/package.json packages/ai/
+COPY packages/scoring/package.json packages/scoring/
+COPY packages/source-adapters/package.json packages/source-adapters/
+COPY packages/config/package.json packages/config/
+ARG WORKER_NAME
+COPY workers/${WORKER_NAME}/package.json workers/${WORKER_NAME}/
+RUN pnpm install --frozen-lockfile || pnpm install
+
+FROM base AS build
+ARG WORKER_NAME
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN pnpm turbo build --filter=@alh/${WORKER_NAME}
+
+FROM base AS runner
+ARG WORKER_NAME
+COPY --from=build /app/workers/${WORKER_NAME}/dist ./workers/${WORKER_NAME}/dist
+COPY --from=build /app/packages/*/dist ./packages/*/dist
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./
+
+ENV NODE_ENV=production
+CMD ["node", "workers/${WORKER_NAME}/dist/main.js"]

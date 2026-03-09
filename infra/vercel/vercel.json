@@ -1,0 +1,14 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && npx turbo build --filter=@alh/dashboard-web",
+  "outputDirectory": ".next",
+  "installCommand": "cd ../.. && pnpm install",
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    }
+  ]
+}

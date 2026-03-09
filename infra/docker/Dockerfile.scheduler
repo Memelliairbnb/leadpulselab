@@ -1,0 +1,26 @@
+FROM node:20-slim AS base
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
+COPY packages/db/package.json packages/db/
+COPY packages/types/package.json packages/types/
+COPY packages/queues/package.json packages/queues/
+COPY packages/observability/package.json packages/observability/
+COPY apps/scheduler/package.json apps/scheduler/
+RUN pnpm install --frozen-lockfile || pnpm install
+
+FROM base AS build
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN pnpm turbo build --filter=@alh/scheduler
+
+FROM base AS runner
+COPY --from=build /app/apps/scheduler/dist ./apps/scheduler/dist
+COPY --from=build /app/packages/*/dist ./packages/*/dist
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./
+
+ENV NODE_ENV=production
+CMD ["node", "apps/scheduler/dist/main.js"]

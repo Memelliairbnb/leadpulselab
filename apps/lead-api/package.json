@@ -1,0 +1,25 @@
+{
+  "name": "@alh/lead-api",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/main.ts",
+  "types": "./src/main.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^5.2.0",
+    "@fastify/cors": "^11.0.0",
+    "@alh/db": "workspace:*",
+    "@alh/queues": "workspace:*",
+    "@alh/types": "workspace:*",
+    "@alh/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

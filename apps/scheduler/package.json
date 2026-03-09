@@ -1,0 +1,24 @@
+{
+  "name": "@alh/scheduler",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/main.ts",
+  "types": "./src/main.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "@alh/db": "workspace:*",
+    "@alh/queues": "workspace:*",
+    "@alh/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
