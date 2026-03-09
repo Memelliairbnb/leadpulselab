@@ -15,3 +15,4 @@ export * from './analytics-tables';
 export * from './sourcing';
 export * from './costs';
 export * from './reprocessing';
+export * from './instagram';

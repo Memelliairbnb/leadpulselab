@@ -6,6 +6,9 @@ import type {
   LeadEnrichmentJobData,
   OutreachGenerationJobData,
   RescoreJobData,
+  InstagramDiscoveryJobData,
+  InstagramScrubJobData,
+  InstagramEnrichmentJobData,
 } from './types';
 
 export async function enqueueSourceScan(data: SourceScanJobData) {
@@ -47,5 +50,26 @@ export async function enqueueRescore(data: RescoreJobData) {
   const queue = getQueue(QUEUE_NAMES.RESCORE);
   await queue.add('rescore', data, {
     jobId: `rescore-${data.qualifiedLeadId}-${Date.now()}`,
+  });
+}
+
+export async function enqueueInstagramDiscovery(data: InstagramDiscoveryJobData) {
+  const queue = getQueue(QUEUE_NAMES.INSTAGRAM_DISCOVERY);
+  await queue.add('discover', data, {
+    jobId: `ig-discover-${data.discoveryRunId}-${Date.now()}`,
+  });
+}
+
+export async function enqueueInstagramScrub(data: InstagramScrubJobData) {
+  const queue = getQueue(QUEUE_NAMES.INSTAGRAM_SCRUB);
+  await queue.add('scrub', data, {
+    jobId: `ig-scrub-${data.rawProfileId}-${Date.now()}`,
+  });
+}
+
+export async function enqueueInstagramEnrichment(data: InstagramEnrichmentJobData) {
+  const queue = getQueue(QUEUE_NAMES.INSTAGRAM_ENRICHMENT);
+  await queue.add('enrich', data, {
+    jobId: `ig-enrich-${data.candidateId}-${Date.now()}`,
   });
 }

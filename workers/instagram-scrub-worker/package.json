@@ -1,0 +1,26 @@
+{
+  "name": "@alh/instagram-scrub-worker",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/main.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bullmq": "^5.30.0",
+    "drizzle-orm": "^0.38.0",
+    "ioredis": "^5.4.0",
+    "@alh/queues": "workspace:*",
+    "@alh/db": "workspace:*",
+    "@alh/types": "workspace:*",
+    "@alh/observability": "workspace:*",
+    "@alh/config": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

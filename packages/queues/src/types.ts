@@ -41,3 +41,21 @@ export interface StaleArchiveJobData {
   tenantId: number;
   qualifiedLeadId: number;
 }
+
+export interface InstagramDiscoveryJobData {
+  tenantId: number;
+  searchQuery: string;
+  searchType: string;
+  discoveryRunId: number;
+}
+
+export interface InstagramScrubJobData {
+  tenantId: number;
+  rawProfileId: number;
+  discoveryRunId: number;
+}
+
+export interface InstagramEnrichmentJobData {
+  tenantId: number;
+  candidateId: number;
+}
