@@ -49,7 +49,7 @@ export class GoogleSearchAdapter implements SourceAdapter {
           continue;
         }
 
-        const data: GoogleSearchResult = await res.json();
+        const data = (await res.json()) as GoogleSearchResult;
         results.push({
           sourceUrl: url.toString(),
           fetchMethod: 'api',

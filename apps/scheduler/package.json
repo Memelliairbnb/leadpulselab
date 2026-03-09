@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "node-cron": "^3.0.3",
+    "drizzle-orm": "^0.38.0",
     "@alh/db": "workspace:*",
     "@alh/queues": "workspace:*",
     "@alh/observability": "workspace:*"

@@ -1,14 +1,18 @@
 import { Job } from "bullmq";
 import { db } from "@alh/db";
-import { qualifiedLeads, tenantSettings } from "@alh/db/schema";
-import { eq, and } from "@alh/db/orm";
+import {
+  qualifiedLeads,
+  tenantScoringModels,
+  leadContacts,
+} from "@alh/db";
+import { eq, and } from "drizzle-orm";
 import { logger } from "@alh/observability";
 import { getQueue, QUEUE_NAMES } from "@alh/queues";
-import type { LeadEnrichmentJobData } from "@alh/types";
+import type { LeadEnrichmentJobData } from "@alh/queues";
 
 const log = logger.child({ module: "enrichment-processor" });
 
-interface ContactMethod {
+interface CategorizedContact {
   type: string;
   value: string;
   raw?: string;
@@ -35,7 +39,7 @@ function normalizeLocation(raw: string | null): string | null {
 /**
  * Categorize a contact value into a type.
  */
-function categorizeContact(value: string): ContactMethod {
+function categorizeContact(value: string): CategorizedContact {
   const trimmed = value.trim();
 
   // Email pattern
@@ -46,7 +50,6 @@ function categorizeContact(value: string): ContactMethod {
   // Phone pattern (various formats)
   const digitsOnly = trimmed.replace(/\D/g, "");
   if (digitsOnly.length >= 7 && digitsOnly.length <= 15) {
-    // Likely a phone number
     return { type: "phone", value: digitsOnly, raw: value };
   }
 
@@ -97,31 +100,70 @@ export async function processLeadEnrichment(
   }
 
   try {
-    // Normalize location
-    const normalizedLocation = normalizeLocation(lead.location);
+    // Normalize location from city/state
+    const locationParts = [lead.city, lead.state, lead.country].filter(
+      Boolean
+    );
+    const normalizedLocation = normalizeLocation(locationParts.join(", "));
 
-    // Categorize contact methods
-    const rawContacts = (lead.contactMethods as string[]) ?? [];
-    const categorizedContacts: ContactMethod[] = rawContacts.map(
-      categorizeContact
+    // Parse location back into components if we normalized it
+    if (normalizedLocation) {
+      const parts = normalizedLocation.split(", ");
+      await db
+        .update(qualifiedLeads)
+        .set({
+          city: parts[0] ?? lead.city,
+          state: parts[1] ?? lead.state,
+          country: parts[2] ?? lead.country,
+        })
+        .where(eq(qualifiedLeads.id, qualifiedLeadId));
+    }
+
+    // Load existing contacts for this lead
+    const existingContacts = await db
+      .select()
+      .from(leadContacts)
+      .where(eq(leadContacts.leadId, qualifiedLeadId));
+
+    // Categorize existing contact methods
+    const categorizedContacts: CategorizedContact[] = existingContacts.map(
+      (c) => categorizeContact(c.contactValue)
     );
 
-    // Extract primary email and phone if available
-    const primaryEmail =
-      categorizedContacts.find((c) => c.type === "email")?.value ?? null;
-    const primaryPhone =
-      categorizedContacts.find((c) => c.type === "phone")?.value ?? null;
+    // If contactMethod on the lead has a value, categorize and save it too
+    if (lead.contactMethod && !existingContacts.length) {
+      const categorized = categorizeContact(lead.contactMethod);
+      await db.insert(leadContacts).values({
+        leadId: qualifiedLeadId,
+        contactType: categorized.type,
+        contactValue: categorized.value,
+        isPrimary: true,
+        source: "extracted",
+      });
+      categorizedContacts.push(categorized);
+    }
 
-    // Update the lead with enriched data
+    // Determine primary contact type
+    const primaryEmail = categorizedContacts.find(
+      (c) => c.type === "email"
+    );
+    const primaryPhone = categorizedContacts.find(
+      (c) => c.type === "phone"
+    );
+
+    // Update contact type on the lead
+    const contactType = primaryEmail
+      ? "email"
+      : primaryPhone
+        ? "phone"
+        : categorizedContacts[0]?.type ?? null;
+
     await db
       .update(qualifiedLeads)
       .set({
-        location: normalizedLocation,
-        contactMethodsEnriched: categorizedContacts,
-        primaryEmail,
-        primaryPhone,
+        contactType,
         status: "enriched",
-        enrichedAt: new Date(),
+        updatedAt: new Date(),
       })
       .where(eq(qualifiedLeads.id, qualifiedLeadId));
 
@@ -136,17 +178,22 @@ export async function processLeadEnrichment(
       "Lead enrichment complete"
     );
 
-    // Load tenant settings for score threshold
-    const [settings] = await db
+    // Load tenant scoring model for outreach threshold
+    const [scoringModel] = await db
       .select()
-      .from(tenantSettings)
-      .where(eq(tenantSettings.tenantId, tenantId))
+      .from(tenantScoringModels)
+      .where(
+        and(
+          eq(tenantScoringModels.tenantId, tenantId),
+          eq(tenantScoringModels.isActive, true)
+        )
+      )
       .limit(1);
 
-    const outreachScoreThreshold = settings?.outreachMinScore ?? 70;
+    const outreachScoreThreshold = scoringModel?.strongThreshold ?? 70;
 
     // If lead qualifies, push to outreach generation queue
-    if (lead.score >= outreachScoreThreshold) {
+    if (lead.leadScore >= outreachScoreThreshold) {
       const outreachQueue = getQueue(QUEUE_NAMES.OUTREACH_GENERATION);
       await outreachQueue.add(
         "generate-outreach",
@@ -162,7 +209,7 @@ export async function processLeadEnrichment(
       );
 
       log.info(
-        { qualifiedLeadId, score: lead.score },
+        { qualifiedLeadId, score: lead.leadScore },
         "Lead qualifies for outreach, pushed to outreach queue"
       );
 
@@ -172,7 +219,7 @@ export async function processLeadEnrichment(
     log.info(
       {
         qualifiedLeadId,
-        score: lead.score,
+        score: lead.leadScore,
         threshold: outreachScoreThreshold,
       },
       "Lead enriched but below outreach threshold"

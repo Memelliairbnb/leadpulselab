@@ -400,7 +400,7 @@ async function continuousDiscoveryJob() {
           tenantId: tenant.id,
           agentType: 'query_planner',
           campaignId: source.id, // use source as campaign context
-          icpDescription: tenant.icpDescription ?? '',
+          icpDescription: ((tenant.settingsJson as Record<string, unknown>)?.icpDescription as string) ?? '',
           keywords: keywordStrings,
           payload: { sourceType: source.sourceType, sourceId: source.id },
         });

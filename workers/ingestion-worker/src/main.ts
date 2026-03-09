@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { redis, QUEUE_NAMES } from "@alh/queues";
+import { redisConnection, QUEUE_NAMES } from "@alh/queues";
 import { logger } from "@alh/observability";
 import { processSourceScan } from "./processor.js";
 
@@ -12,7 +12,7 @@ const worker = new Worker(
     return processSourceScan(job);
   },
   {
-    connection: redis,
+    connection: redisConnection,
     concurrency: 3,
     limiter: {
       max: 10,
@@ -36,7 +36,7 @@ worker.on("error", (err) => {
 async function shutdown() {
   log.info("Shutting down ingestion worker...");
   await worker.close();
-  await redis.quit();
+  await redisConnection.quit();
   process.exit(0);
 }
 

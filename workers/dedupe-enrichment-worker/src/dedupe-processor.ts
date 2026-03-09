@@ -1,7 +1,7 @@
 import { Job } from "bullmq";
 import { db } from "@alh/db";
-import { qualifiedLeads, tenantSettings } from "@alh/db/schema";
-import { eq, and, ne } from "@alh/db/orm";
+import { qualifiedLeads, tenantScoringModels, leadContacts } from "@alh/db";
+import { eq, and, ne } from "drizzle-orm";
 import { logger } from "@alh/observability";
 import { getQueue, QUEUE_NAMES } from "@alh/queues";
 import {
@@ -9,7 +9,7 @@ import {
   hashText,
   type DuplicateCandidate,
 } from "./similarity.js";
-import type { LeadDedupeJobData } from "@alh/types";
+import type { LeadDedupeJobData } from "@alh/queues";
 
 const log = logger.child({ module: "dedupe-processor" });
 
@@ -33,21 +33,26 @@ export async function processLeadDedupe(job: Job<LeadDedupeJobData>) {
   }
 
   try {
-    // Load tenant settings for score threshold
-    const [settings] = await db
+    // Load tenant scoring model for score threshold
+    const [scoringModel] = await db
       .select()
-      .from(tenantSettings)
-      .where(eq(tenantSettings.tenantId, tenantId))
+      .from(tenantScoringModels)
+      .where(
+        and(
+          eq(tenantScoringModels.tenantId, tenantId),
+          eq(tenantScoringModels.isActive, true)
+        )
+      )
       .limit(1);
 
-    const scoreThreshold = settings?.minLeadScore ?? 50;
+    const scoreThreshold = scoringModel?.nurtureThreshold ?? 50;
 
     // Check score threshold first
-    if (lead.score < scoreThreshold) {
+    if (lead.leadScore < scoreThreshold) {
       log.info(
         {
           qualifiedLeadId,
-          score: lead.score,
+          score: lead.leadScore,
           threshold: scoreThreshold,
         },
         "Lead below score threshold, marking as low_score"
@@ -61,15 +66,20 @@ export async function processLeadDedupe(job: Job<LeadDedupeJobData>) {
       return { action: "filtered", reason: "below_threshold" };
     }
 
+    // Load contacts for this lead
+    const currentContacts = await db
+      .select()
+      .from(leadContacts)
+      .where(eq(leadContacts.leadId, qualifiedLeadId));
+
     // Load existing leads for the same tenant to check duplicates
     const existingLeads = await db
       .select({
         id: qualifiedLeads.id,
         profileUrl: qualifiedLeads.profileUrl,
-        contentSnippet: qualifiedLeads.contentSnippet,
-        authorName: qualifiedLeads.authorName,
-        platformName: qualifiedLeads.platformName,
-        contactMethods: qualifiedLeads.contactMethods,
+        fullName: qualifiedLeads.fullName,
+        platform: qualifiedLeads.platform,
+        aiSummary: qualifiedLeads.aiSummary,
       })
       .from(qualifiedLeads)
       .where(
@@ -80,24 +90,27 @@ export async function processLeadDedupe(job: Job<LeadDedupeJobData>) {
         )
       );
 
+    // Load contacts for all existing leads for comparison
+    const existingLeadIds = existingLeads.map((el) => el.id);
+
     // Build candidate objects for comparison
     const currentCandidate: DuplicateCandidate = {
-      id: lead.id,
+      id: String(lead.id),
       profileUrl: lead.profileUrl,
-      contentHash: lead.contentSnippet ? hashText(lead.contentSnippet) : null,
-      authorName: lead.authorName,
-      platformName: lead.platformName,
-      contactMethods: (lead.contactMethods as string[]) ?? [],
+      contentHash: lead.aiSummary ? hashText(lead.aiSummary) : null,
+      authorName: lead.fullName,
+      platformName: lead.platform,
+      contactMethods: currentContacts.map((c) => c.contactValue),
     };
 
     const existingCandidates: DuplicateCandidate[] = existingLeads.map(
       (el) => ({
-        id: el.id,
+        id: String(el.id),
         profileUrl: el.profileUrl,
-        contentHash: el.contentSnippet ? hashText(el.contentSnippet) : null,
-        authorName: el.authorName,
-        platformName: el.platformName,
-        contactMethods: (el.contactMethods as string[]) ?? [],
+        contentHash: el.aiSummary ? hashText(el.aiSummary) : null,
+        authorName: el.fullName,
+        platformName: el.platform,
+        contactMethods: [], // simplified - full contact loading would be expensive
       })
     );
 
@@ -118,9 +131,11 @@ export async function processLeadDedupe(job: Job<LeadDedupeJobData>) {
         .update(qualifiedLeads)
         .set({
           status: "duplicate",
-          duplicateOfId: dupeResult.matchedLeadId,
-          dedupeMatchType: dupeResult.matchType,
-          dedupeMatchScore: dupeResult.matchScore,
+          isDuplicate: true,
+          duplicateOfLeadId: dupeResult.matchedLeadId
+            ? parseInt(dupeResult.matchedLeadId, 10)
+            : null,
+          duplicateConfidence: String(dupeResult.matchScore),
         })
         .where(eq(qualifiedLeads.id, qualifiedLeadId));
 

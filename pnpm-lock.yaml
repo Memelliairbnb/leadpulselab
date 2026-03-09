@@ -100,6 +100,9 @@ importers:
       '@alh/queues':
         specifier: workspace:*
         version: link:../../packages/queues
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       node-cron:
         specifier: ^3.0.3
         version: 3.0.3
@@ -221,6 +224,10 @@ importers:
         version: 5.9.3
 
   packages/utils:
+    dependencies:
+      '@alh/observability':
+        specifier: workspace:*
+        version: link:../observability
     devDependencies:
       typescript:
         specifier: ^5.7.0
@@ -252,6 +259,9 @@ importers:
       bullmq:
         specifier: ^5.30.0
         version: 5.70.4
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       ioredis:
         specifier: ^5.4.0
         version: 5.10.0
@@ -283,6 +293,9 @@ importers:
       bullmq:
         specifier: ^5.30.0
         version: 5.70.4
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       ioredis:
         specifier: ^5.4.0
         version: 5.10.0
@@ -320,6 +333,9 @@ importers:
       bullmq:
         specifier: ^5.30.0
         version: 5.70.4
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       ioredis:
         specifier: ^5.4.0
         version: 5.10.0
@@ -354,6 +370,9 @@ importers:
       bullmq:
         specifier: ^5.30.0
         version: 5.70.4
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       ioredis:
         specifier: ^5.4.0
         version: 5.10.0
@@ -388,6 +407,9 @@ importers:
       bullmq:
         specifier: ^5.30.0
         version: 5.70.4
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       ioredis:
         specifier: ^5.4.0
         version: 5.10.0
@@ -419,6 +441,9 @@ importers:
       bullmq:
         specifier: ^5.30.0
         version: 5.70.4
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       ioredis:
         specifier: ^5.4.0
         version: 5.10.0

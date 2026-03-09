@@ -4,8 +4,8 @@ import { logger } from "@alh/observability";
 import { getQueue, SWARM_QUEUE_NAMES } from "@alh/queues";
 import type { RawCaptureJobData } from "@alh/queues";
 import { db } from "@alh/db";
-import { rawLeads } from "@alh/db/schema";
-import { eq } from "@alh/db/orm";
+import { rawLeads } from "@alh/db";
+import { eq } from "drizzle-orm";
 import { keywordRepo } from "@alh/db/src/repositories/keyword-repo";
 
 const log = logger.child({ module: "raw-capturer" });

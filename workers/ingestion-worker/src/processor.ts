@@ -5,17 +5,18 @@ import {
   platformSources,
   rawSources,
   rawLeads,
-} from "@alh/db/schema";
-import { eq } from "@alh/db/orm";
+} from "@alh/db";
+import { eq } from "drizzle-orm";
 import { logger } from "@alh/observability";
 import { getQueue, QUEUE_NAMES } from "@alh/queues";
-import { loadAdapter } from "@alh/source-adapters";
-import type { SourceScanJobData } from "@alh/types";
+import type { SourceScanJobData } from "@alh/queues";
+import { getAdapter } from "@alh/source-adapters";
+import crypto from "crypto";
 
 const log = logger.child({ module: "ingestion-processor" });
 
 export async function processSourceScan(job: Job<SourceScanJobData>) {
-  const { scanJobId, platformSourceId, tenantId } = job.data;
+  const { scanJobId, sourceId, tenantId, keywords } = job.data;
 
   // Update scan job status to running
   await db
@@ -28,101 +29,122 @@ export async function processSourceScan(job: Job<SourceScanJobData>) {
     const [source] = await db
       .select()
       .from(platformSources)
-      .where(eq(platformSources.id, platformSourceId))
+      .where(eq(platformSources.id, sourceId))
       .limit(1);
 
     if (!source) {
-      throw new Error(`Platform source not found: ${platformSourceId}`);
+      throw new Error(`Platform source not found: ${sourceId}`);
     }
 
     log.info(
-      { adapterKey: source.adapterKey, platformSourceId },
+      { adapterKey: source.adapterKey, sourceId },
       "Loading source adapter"
     );
 
     // Load the adapter for this platform source
-    const adapter = loadAdapter(source.adapterKey);
+    const adapter = getAdapter(source.adapterKey);
+    if (!adapter) {
+      throw new Error(`No adapter found for key: ${source.adapterKey}`);
+    }
 
     // Fetch raw data from the source
-    const fetchResult = await adapter.fetch({
-      keywords: source.keywords ?? [],
-      config: source.config ?? {},
-      credentials: source.credentials ?? {},
-      lastCursor: source.lastCursor ?? undefined,
+    const rawPayloads = await adapter.fetch({
+      keywords: keywords ?? [],
+      config: (source.configJson as Record<string, unknown>) ?? {},
     });
 
     log.info(
-      { resultCount: fetchResult.items.length, adapterKey: source.adapterKey },
-      "Fetched raw items from source"
+      { resultCount: rawPayloads.length, adapterKey: source.adapterKey },
+      "Fetched raw payloads from source"
     );
 
-    // Save raw source record
-    const [rawSource] = await db
-      .insert(rawSources)
-      .values({
-        tenantId,
-        platformSourceId,
-        scanJobId,
-        fetchedAt: new Date(),
-        rawPayload: fetchResult.rawPayload,
-        itemCount: fetchResult.items.length,
-        cursor: fetchResult.nextCursor ?? null,
-      })
-      .returning();
-
-    // Update platform source cursor for next scan
-    if (fetchResult.nextCursor) {
-      await db
-        .update(platformSources)
-        .set({ lastCursor: fetchResult.nextCursor })
-        .where(eq(platformSources.id, platformSourceId));
-    }
-
-    // Extract and save raw leads
+    // Process each raw payload
     const leadAnalysisQueue = getQueue(QUEUE_NAMES.LEAD_ANALYSIS);
     let extractedCount = 0;
 
-    for (const item of fetchResult.items) {
+    for (const payload of rawPayloads) {
       try {
-        const [lead] = await db
-          .insert(rawLeads)
+        const payloadStr = JSON.stringify(payload.payload);
+        const checksumHash = crypto
+          .createHash("sha256")
+          .update(payloadStr)
+          .digest("hex");
+
+        // Save raw source record
+        const [rawSource] = await db
+          .insert(rawSources)
           .values({
             tenantId,
-            rawSourceId: rawSource.id,
-            platformSourceId,
-            platformName: source.platformName,
-            externalId: item.externalId ?? null,
-            profileUrl: item.profileUrl ?? null,
-            authorName: item.authorName ?? null,
-            authorHandle: item.authorHandle ?? null,
-            contentText: item.contentText ?? null,
-            contentUrl: item.contentUrl ?? null,
-            postedAt: item.postedAt ? new Date(item.postedAt) : null,
-            rawData: item.rawData,
-            status: "pending",
+            scanJobId,
+            sourceName: source.name,
+            sourceType: source.sourceType,
+            sourceUrl: payload.sourceUrl,
+            fetchMethod: payload.fetchMethod,
+            sourcePayloadJson: payload.payload,
+            checksumHash,
+            fetchedAt: payload.fetchedAt,
           })
           .returning();
 
-        // Push each lead to the analysis queue
-        await leadAnalysisQueue.add(
-          "analyze-lead",
-          {
-            rawLeadId: lead.id,
-            tenantId,
-            platformSourceId,
-          },
-          {
-            jobId: `analyze-${lead.id}`,
-            attempts: 3,
-            backoff: { type: "exponential", delay: 5000 },
-          }
-        );
+        // Extract leads from this payload
+        const candidates = adapter.extractLeads(payload);
 
-        extractedCount++;
+        for (const candidate of candidates) {
+          try {
+            const textHash = crypto
+              .createHash("sha256")
+              .update(candidate.rawText)
+              .digest("hex");
+
+            const [lead] = await db
+              .insert(rawLeads)
+              .values({
+                tenantId,
+                rawSourceId: rawSource.id,
+                platform: candidate.platform,
+                profileName: candidate.profileName ?? null,
+                profileUrl: candidate.profileUrl ?? null,
+                sourceUrl: candidate.sourceUrl,
+                matchedKeywords: candidate.matchedKeywords,
+                rawText: candidate.rawText,
+                rawMetadataJson: candidate.rawMetadata,
+                locationText: candidate.locationText ?? null,
+                contactHint: candidate.contactHint ?? null,
+                contentDate: candidate.contentDate,
+                textHash,
+                processingStatus: "pending",
+              })
+              .returning();
+
+            // Push each lead to the analysis queue
+            await leadAnalysisQueue.add(
+              "analyze-lead",
+              {
+                rawLeadId: lead.id,
+                tenantId,
+              },
+              {
+                jobId: `analyze-${lead.id}`,
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5000 },
+              }
+            );
+
+            extractedCount++;
+          } catch (err) {
+            log.error(
+              {
+                error: (err as Error).message,
+                profileName: candidate.profileName,
+              },
+              "Failed to save raw lead"
+            );
+          }
+        }
       } catch (err) {
         log.error(
-          { error: (err as Error).message, externalId: item.externalId },
-          "Failed to save raw lead"
+          { error: (err as Error).message, sourceUrl: payload.sourceUrl },
+          "Failed to process raw payload"
         );
       }
     }
@@ -133,17 +155,17 @@ export async function processSourceScan(job: Job<SourceScanJobData>) {
       .set({
         status: "completed",
         completedAt: new Date(),
-        itemsFound: fetchResult.items.length,
-        leadsExtracted: extractedCount,
+        resultsCount: rawPayloads.length,
+        leadsFound: extractedCount,
       })
       .where(eq(scanJobs.id, scanJobId));
 
     log.info(
-      { scanJobId, extractedCount, totalItems: fetchResult.items.length },
+      { scanJobId, extractedCount, totalPayloads: rawPayloads.length },
       "Source scan completed"
     );
 
-    return { extractedCount, totalItems: fetchResult.items.length };
+    return { extractedCount, totalPayloads: rawPayloads.length };
   } catch (err) {
     const error = err as Error;
     log.error({ scanJobId, error: error.message }, "Source scan failed");

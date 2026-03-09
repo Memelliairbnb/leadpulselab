@@ -52,7 +52,7 @@ export class RedditAdapter implements SourceAdapter {
 
     if (!res.ok) throw new Error(`Reddit auth failed: ${res.status}`);
 
-    const data = await res.json();
+    const data = (await res.json()) as { access_token: string; expires_in: number };
     this.accessToken = data.access_token;
     this.tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
     return this.accessToken!;
@@ -83,7 +83,7 @@ export class RedditAdapter implements SourceAdapter {
           continue;
         }
 
-        const data: RedditListing = await res.json();
+        const data = (await res.json()) as RedditListing;
         results.push({
           sourceUrl: url.toString(),
           fetchMethod: 'api',

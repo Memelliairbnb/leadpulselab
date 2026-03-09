@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { redis, QUEUE_NAMES } from "@alh/queues";
+import { redisConnection, QUEUE_NAMES } from "@alh/queues";
 import { logger } from "@alh/observability";
 import { processLeadDedupe } from "./dedupe-processor.js";
 import { processLeadEnrichment } from "./enrichment-processor.js";
@@ -14,7 +14,7 @@ const dedupeWorker = new Worker(
     return processLeadDedupe(job);
   },
   {
-    connection: redis,
+    connection: redisConnection,
     concurrency: 5,
   }
 );
@@ -39,7 +39,7 @@ const enrichmentWorker = new Worker(
     return processLeadEnrichment(job);
   },
   {
-    connection: redis,
+    connection: redisConnection,
     concurrency: 5,
   }
 );
@@ -59,7 +59,7 @@ enrichmentWorker.on("error", (err) => {
 async function shutdown() {
   log.info("Shutting down dedupe-enrichment worker...");
   await Promise.all([dedupeWorker.close(), enrichmentWorker.close()]);
-  await redis.quit();
+  await redisConnection.quit();
   process.exit(0);
 }
 

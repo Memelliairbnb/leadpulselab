@@ -4,17 +4,18 @@ import {
   qualifiedLeads,
   outreachDrafts,
   optOuts,
-  tenantAiConfigs,
+  tenantAiConfig,
   tenantOutreachTemplates,
-} from "@alh/db/schema";
-import { eq, and, or } from "@alh/db/orm";
+  leadContacts,
+} from "@alh/db";
+import { eq, and, or } from "drizzle-orm";
 import { logger } from "@alh/observability";
+import type { OutreachGenerationJobData } from "@alh/queues";
 import {
   generateOutreachDraft,
   buildOutreachSystemPrompt,
   buildOutreachUserPrompt,
 } from "@alh/ai";
-import type { OutreachGenerationJobData } from "@alh/types";
 
 const log = logger.child({ module: "outreach-processor" });
 
@@ -40,30 +41,24 @@ export async function processOutreachGeneration(
   }
 
   try {
-    // Check opt-outs by email, phone, or profile URL
-    const optOutConditions = [];
+    // Check opt-outs by contact identifiers and profile URL
+    const contacts = await db
+      .select()
+      .from(leadContacts)
+      .where(eq(leadContacts.leadId, qualifiedLeadId));
 
-    if (lead.primaryEmail) {
-      optOutConditions.push(
-        and(
-          eq(optOuts.tenantId, tenantId),
-          eq(optOuts.contactValue, lead.primaryEmail)
-        )
-      );
-    }
-    if (lead.primaryPhone) {
-      optOutConditions.push(
-        and(
-          eq(optOuts.tenantId, tenantId),
-          eq(optOuts.contactValue, lead.primaryPhone)
-        )
-      );
-    }
+    const optOutConditions = contacts.map((c) =>
+      and(
+        eq(optOuts.tenantId, tenantId),
+        eq(optOuts.identifier, c.contactValue)
+      )
+    );
+
     if (lead.profileUrl) {
       optOutConditions.push(
         and(
           eq(optOuts.tenantId, tenantId),
-          eq(optOuts.contactValue, lead.profileUrl)
+          eq(optOuts.identifier, lead.profileUrl)
         )
       );
     }
@@ -94,8 +89,8 @@ export async function processOutreachGeneration(
     const [aiConfigRows, templates] = await Promise.all([
       db
         .select()
-        .from(tenantAiConfigs)
-        .where(eq(tenantAiConfigs.tenantId, tenantId))
+        .from(tenantAiConfig)
+        .where(eq(tenantAiConfig.tenantId, tenantId))
         .limit(1),
       db
         .select()
@@ -114,80 +109,56 @@ export async function processOutreachGeneration(
       throw new Error(`No AI config found for tenant: ${tenantId}`);
     }
 
-    // Find best matching template based on lead type or use default
-    const template =
-      templates.find((t) => t.leadType === lead.leadType) ??
-      templates.find((t) => t.isDefault) ??
-      templates[0] ??
-      null;
+    // Find best matching template based on lead type or use first available
+    const template = templates[0] ?? null;
+
+    // Determine channel from template or default
+    const channel = template?.channel ?? "dm";
 
     // Build outreach prompts
     const systemPrompt = buildOutreachSystemPrompt({
-      template: template
-        ? {
-            name: template.name,
-            tone: template.tone,
-            guidelines: template.guidelines,
-            exampleMessages: template.exampleMessages,
-          }
-        : undefined,
-      tenantContext: aiConfig.outreachContext ?? undefined,
+      industryContext: aiConfig.industryContext,
+      outreachInstructions: aiConfig.outreachInstructions ?? null,
     });
 
     const userPrompt = buildOutreachUserPrompt({
       leadType: lead.leadType,
-      authorName: lead.authorName,
-      authorHandle: lead.authorHandle,
-      platformName: lead.platformName,
-      contentSnippet: lead.contentSnippet,
+      platform: lead.platform,
       aiSummary: lead.aiSummary,
-      score: lead.score,
-      signals: lead.signals as Record<string, unknown>,
-      contactMethods: lead.contactMethodsEnriched as Array<{
-        type: string;
-        value: string;
-      }>,
+      signals: (lead.aiSignalsJson as string[]) ?? [],
+      channel,
     });
 
     log.info({ qualifiedLeadId, tenantId }, "Generating outreach draft via AI");
 
     // Generate outreach draft via Claude
-    const draftResult = await generateOutreachDraft({
-      systemPrompt,
-      userPrompt,
-      model: aiConfig.model ?? "claude-sonnet-4-20250514",
-      maxTokens: aiConfig.maxTokens ?? 1024,
-      apiKey: aiConfig.apiKey,
-    });
+    const draftResult = await generateOutreachDraft(systemPrompt, userPrompt);
 
     // Save the outreach draft
     const [draft] = await db
       .insert(outreachDrafts)
       .values({
         tenantId,
-        qualifiedLeadId,
-        templateId: template?.id ?? null,
-        channel: draftResult.channel ?? "direct_message",
+        leadId: qualifiedLeadId,
+        channel,
         subject: draftResult.subject ?? null,
         body: draftResult.body,
-        tone: draftResult.tone ?? template?.tone ?? null,
-        personalizationNotes: draftResult.personalizationNotes ?? null,
+        promptTemplate: template?.name ?? null,
         status: "pending_review",
-        generatedAt: new Date(),
       })
       .returning();
 
     // Update qualified lead status
     await db
       .update(qualifiedLeads)
-      .set({ status: "outreach_drafted", outreachDraftId: draft.id })
+      .set({ status: "outreach_drafted" })
       .where(eq(qualifiedLeads.id, qualifiedLeadId));
 
     log.info(
       {
         qualifiedLeadId,
         draftId: draft.id,
-        channel: draftResult.channel,
+        channel,
       },
       "Outreach draft generated successfully"
     );
@@ -196,7 +167,7 @@ export async function processOutreachGeneration(
       action: "draft_created",
       draftId: draft.id,
       qualifiedLeadId,
-      channel: draftResult.channel,
+      channel,
     };
   } catch (err) {
     const error = err as Error;
@@ -207,7 +178,7 @@ export async function processOutreachGeneration(
 
     await db
       .update(qualifiedLeads)
-      .set({ status: "outreach_failed", errorMessage: error.message })
+      .set({ status: "outreach_failed" })
       .where(eq(qualifiedLeads.id, qualifiedLeadId));
 
     throw error;
