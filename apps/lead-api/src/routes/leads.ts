@@ -175,6 +175,8 @@ export async function leadsRoutes(app: FastifyInstance) {
       minScore: request.query.minScore ? Number(request.query.minScore) : undefined,
       maxScore: request.query.maxScore ? Number(request.query.maxScore) : undefined,
       assignedTo: request.query.assignedTo ? Number(request.query.assignedTo) : undefined,
+      resolutionStatus: request.query.resolutionStatus,
+      resolutionTab: request.query.resolutionTab,
       needsReview: request.query.needsReview,
       isDuplicate: request.query.isDuplicate,
       search: request.query.search,

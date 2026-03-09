@@ -1,6 +1,6 @@
 import { db } from '../client';
 import { qualifiedLeads, rawLeads, leadActivity, qualifiedLeadTags, leadTags, leadContacts } from '../schema';
-import { eq, desc, and, gte, lte, sql, ilike, or } from 'drizzle-orm';
+import { eq, desc, and, gte, lte, sql, ilike, or, inArray } from 'drizzle-orm';
 import type { LeadFilters } from '@alh/types';
 
 export const leadRepo = {
@@ -16,6 +16,27 @@ export const leadRepo = {
     if (filters.assignedTo !== undefined) conditions.push(eq(qualifiedLeads.assignedToUserId, filters.assignedTo));
     if (filters.needsReview !== undefined) conditions.push(eq(qualifiedLeads.needsReview, filters.needsReview));
     if (filters.isDuplicate !== undefined) conditions.push(eq(qualifiedLeads.isDuplicate, filters.isDuplicate));
+    if (filters.resolutionStatus) {
+      conditions.push(eq(qualifiedLeads.resolutionStatus, filters.resolutionStatus));
+    }
+    if (filters.resolutionTab && filters.resolutionTab !== 'all') {
+      if (filters.resolutionTab === 'qualified') {
+        conditions.push(eq(qualifiedLeads.resolutionStatus, 'qualified'));
+      } else if (filters.resolutionTab === 'in_progress') {
+        conditions.push(
+          inArray(qualifiedLeads.resolutionStatus, [
+            'signal_found',
+            'profile_extracted',
+            'identity_candidate',
+            'contact_candidate',
+            'email_found',
+            'phone_found',
+          ]),
+        );
+      } else if (filters.resolutionTab === 'inventory') {
+        conditions.push(eq(qualifiedLeads.resolutionStatus, 'partial_inventory'));
+      }
+    }
     if (filters.search) {
       conditions.push(
         or(
