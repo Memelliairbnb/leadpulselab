@@ -72,6 +72,9 @@ importers:
       '@fastify/cors':
         specifier: ^11.0.0
         version: 11.2.0
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       fastify:
         specifier: ^5.2.0
         version: 5.8.2
@@ -178,8 +181,8 @@ importers:
         specifier: ^5.30.0
         version: 5.70.4
       ioredis:
-        specifier: ^5.4.0
-        version: 5.10.0
+        specifier: 5.9.3
+        version: 5.9.3
     devDependencies:
       typescript:
         specifier: ^5.7.0

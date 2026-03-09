@@ -4,7 +4,7 @@ import {
   canonicalLeads,
   leadIdentities,
   leadDomains,
-  lifecycleEvents,
+  leadLifecycleEvents,
 } from '@alh/db/src/schema';
 import { eq, and, ilike, sql, desc, asc } from 'drizzle-orm';
 import { logger } from '@alh/observability';
@@ -49,31 +49,31 @@ export async function canonicalRoutes(app: FastifyInstance) {
         conditions.push(eq(canonicalLeads.lifecycleState, lifecycle_state));
       }
       if (industry) {
-        conditions.push(eq(canonicalLeads.industry, industry));
+        conditions.push(eq(canonicalLeads.industryInference, industry));
       }
       if (geo) {
-        conditions.push(eq(canonicalLeads.geo, geo));
+        conditions.push(eq(canonicalLeads.geoRegion, geo));
       }
       if (persona) {
-        conditions.push(eq(canonicalLeads.persona, persona));
+        conditions.push(eq(canonicalLeads.personaInference, persona));
       }
       if (freshness) {
-        conditions.push(eq(canonicalLeads.freshness, freshness));
+        conditions.push(eq(canonicalLeads.freshnessScore, Number(freshness)));
       }
       if (verification) {
-        conditions.push(eq(canonicalLeads.verification, verification));
+        conditions.push(eq(canonicalLeads.verificationStatus, verification));
       }
       if (search) {
         conditions.push(
-          ilike(canonicalLeads.displayName, `%${search}%`),
+          ilike(canonicalLeads.normalizedName, `%${search}%`),
         );
       }
 
       const where = and(...conditions);
 
       const orderCol =
-        sortBy === 'displayName'
-          ? canonicalLeads.displayName
+        sortBy === 'normalizedName'
+          ? canonicalLeads.normalizedName
           : sortBy === 'lifecycleState'
             ? canonicalLeads.lifecycleState
             : canonicalLeads.createdAt;
@@ -155,9 +155,9 @@ export async function canonicalRoutes(app: FastifyInstance) {
           .where(eq(leadDomains.canonicalLeadId, id)),
         db
           .select()
-          .from(lifecycleEvents)
-          .where(eq(lifecycleEvents.canonicalLeadId, id))
-          .orderBy(desc(lifecycleEvents.createdAt))
+          .from(leadLifecycleEvents)
+          .where(eq(leadLifecycleEvents.canonicalLeadId, id))
+          .orderBy(desc(leadLifecycleEvents.createdAt))
           .limit(50),
       ]);
 
@@ -230,13 +230,14 @@ export async function canonicalRoutes(app: FastifyInstance) {
         .returning();
 
       // Record lifecycle event
-      await db.insert(lifecycleEvents).values({
+      await db.insert(leadLifecycleEvents).values({
         canonicalLeadId: id,
         tenantId,
         fromState: previousState,
         toState: state,
-        reason: reason ?? null,
-        triggeredBy: userId,
+        eventType: 'lifecycle_change',
+        metadataJson: reason ? { reason } : {},
+        triggeredBy: String(userId),
       });
 
       logger.info({ tenantId, id, previousState, state, userId }, 'Canonical lead lifecycle updated');
@@ -348,11 +349,12 @@ export async function canonicalRoutes(app: FastifyInstance) {
         .insert(leadIdentities)
         .values({
           canonicalLeadId: id,
-          provider,
-          externalId,
+          platform: provider,
+          platformId: externalId,
+          identityType: 'manual',
+          confidence: '1.00',
+          source: 'user',
           profileUrl: profileUrl ?? null,
-          metadata: metadata ?? null,
-          addedBy: userId,
         })
         .returning();
 
@@ -406,15 +408,15 @@ export async function canonicalRoutes(app: FastifyInstance) {
       const [events, countResult] = await Promise.all([
         db
           .select()
-          .from(lifecycleEvents)
-          .where(eq(lifecycleEvents.canonicalLeadId, id))
-          .orderBy(desc(lifecycleEvents.createdAt))
+          .from(leadLifecycleEvents)
+          .where(eq(leadLifecycleEvents.canonicalLeadId, id))
+          .orderBy(desc(leadLifecycleEvents.createdAt))
           .limit(limit)
           .offset(offset),
         db
           .select({ count: sql<number>`count(*)::int` })
-          .from(lifecycleEvents)
-          .where(eq(lifecycleEvents.canonicalLeadId, id)),
+          .from(leadLifecycleEvents)
+          .where(eq(leadLifecycleEvents.canonicalLeadId, id)),
       ]);
 
       const total = countResult[0]?.count ?? 0;

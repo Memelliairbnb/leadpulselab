@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '@alh/db';
 import {
   queryRuns,
-  sourceHealth,
+  sourceHealthMetrics,
   scrubRuns,
   duplicateCandidates,
 } from '@alh/db/src/schema';
@@ -71,9 +71,8 @@ export async function discoveryRoutes(app: FastifyInstance) {
         .values({
           tenantId,
           sourceId,
-          status: 'pending',
-          keywords: keywords ?? [],
-          triggeredBy: userId,
+          queryText: (keywords ?? []).join(', ') || 'manual scan',
+          queryType: 'keyword',
         })
         .returning();
 
@@ -96,9 +95,9 @@ export async function discoveryRoutes(app: FastifyInstance) {
     try {
       const rows = await db
         .select()
-        .from(sourceHealth)
-        .where(eq(sourceHealth.tenantId, tenantId))
-        .orderBy(desc(sourceHealth.qualityScore));
+        .from(sourceHealthMetrics)
+        .where(eq(sourceHealthMetrics.tenantId, tenantId))
+        .orderBy(desc(sourceHealthMetrics.qualityScore));
 
       return { data: rows };
     } catch (err) {
@@ -129,11 +128,11 @@ export async function discoveryRoutes(app: FastifyInstance) {
     try {
       const [health] = await db
         .select()
-        .from(sourceHealth)
+        .from(sourceHealthMetrics)
         .where(
           and(
-            eq(sourceHealth.sourceId, sourceId),
-            eq(sourceHealth.tenantId, tenantId),
+            eq(sourceHealthMetrics.sourceId, sourceId),
+            eq(sourceHealthMetrics.tenantId, tenantId),
           ),
         )
         .limit(1);
@@ -212,10 +211,7 @@ export async function discoveryRoutes(app: FastifyInstance) {
           .select()
           .from(duplicateCandidates)
           .where(
-            and(
-              eq(duplicateCandidates.tenantId, tenantId),
-              eq(duplicateCandidates.status, 'pending'),
-            ),
+            eq(duplicateCandidates.resolution, 'pending'),
           )
           .orderBy(desc(duplicateCandidates.confidence))
           .limit(limit)
@@ -224,10 +220,7 @@ export async function discoveryRoutes(app: FastifyInstance) {
           .select({ count: sql<number>`count(*)::int` })
           .from(duplicateCandidates)
           .where(
-            and(
-              eq(duplicateCandidates.tenantId, tenantId),
-              eq(duplicateCandidates.status, 'pending'),
-            ),
+            eq(duplicateCandidates.resolution, 'pending'),
           ),
       ]);
 
@@ -278,10 +271,7 @@ export async function discoveryRoutes(app: FastifyInstance) {
         .select()
         .from(duplicateCandidates)
         .where(
-          and(
-            eq(duplicateCandidates.id, id),
-            eq(duplicateCandidates.tenantId, tenantId),
-          ),
+          eq(duplicateCandidates.id, id),
         )
         .limit(1);
 
@@ -296,10 +286,8 @@ export async function discoveryRoutes(app: FastifyInstance) {
       const [updated] = await db
         .update(duplicateCandidates)
         .set({
-          status: resolution === 'defer' ? 'deferred' : 'resolved',
-          resolution,
-          reason: reason ?? null,
-          resolvedBy: userId,
+          resolution: resolution === 'defer' ? 'deferred' : resolution,
+          resolvedBy: String(userId),
           resolvedAt: new Date(),
         })
         .where(eq(duplicateCandidates.id, id))

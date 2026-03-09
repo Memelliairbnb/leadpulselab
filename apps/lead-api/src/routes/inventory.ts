@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '@alh/db';
 import {
-  inventoryItems,
-  inventoryPools,
-  inventoryPoolMembers,
-  inventorySegments,
+  leadInventoryItems,
+  leadInventoryPools,
+  leadPoolMemberships,
+  leadSegments,
 } from '@alh/db/src/schema';
 import { eq, and, gte, lte, sql, desc } from 'drizzle-orm';
 import { logger } from '@alh/observability';
@@ -30,25 +30,25 @@ export async function inventoryRoutes(app: FastifyInstance) {
     const offset = (page - 1) * limit;
 
     try {
-      const conditions = [eq(inventoryItems.tenantId, tenantId)];
+      const conditions = [eq(leadInventoryItems.tenantId, tenantId)];
 
       if (temperature) {
-        conditions.push(eq(inventoryItems.temperature, temperature));
+        conditions.push(eq(leadInventoryItems.temperature, temperature));
       }
       if (age_band) {
-        conditions.push(eq(inventoryItems.ageBand, age_band));
+        conditions.push(eq(leadInventoryItems.ageBand, age_band));
       }
       if (industry) {
-        conditions.push(eq(inventoryItems.industry, industry));
+        conditions.push(eq(leadInventoryItems.industry, industry));
       }
       if (status) {
-        conditions.push(eq(inventoryItems.status, status));
+        conditions.push(eq(leadInventoryItems.inventoryStatus, status));
       }
       if (min_value) {
-        conditions.push(gte(inventoryItems.estimatedValue, Number(min_value)));
+        conditions.push(gte(leadInventoryItems.valueScore, Number(min_value)));
       }
       if (max_value) {
-        conditions.push(lte(inventoryItems.estimatedValue, Number(max_value)));
+        conditions.push(lte(leadInventoryItems.valueScore, Number(max_value)));
       }
 
       const where = and(...conditions);
@@ -56,14 +56,14 @@ export async function inventoryRoutes(app: FastifyInstance) {
       const [rows, countResult] = await Promise.all([
         db
           .select()
-          .from(inventoryItems)
+          .from(leadInventoryItems)
           .where(where)
-          .orderBy(desc(inventoryItems.createdAt))
+          .orderBy(desc(leadInventoryItems.createdAt))
           .limit(limit)
           .offset(offset),
         db
           .select({ count: sql<number>`count(*)::int` })
-          .from(inventoryItems)
+          .from(leadInventoryItems)
           .where(where),
       ]);
 
@@ -91,28 +91,28 @@ export async function inventoryRoutes(app: FastifyInstance) {
       const [byTemperature, byAgeBand, byStatus] = await Promise.all([
         db
           .select({
-            temperature: inventoryItems.temperature,
+            temperature: leadInventoryItems.temperature,
             count: sql<number>`count(*)::int`,
           })
-          .from(inventoryItems)
-          .where(eq(inventoryItems.tenantId, tenantId))
-          .groupBy(inventoryItems.temperature),
+          .from(leadInventoryItems)
+          .where(eq(leadInventoryItems.tenantId, tenantId))
+          .groupBy(leadInventoryItems.temperature),
         db
           .select({
-            ageBand: inventoryItems.ageBand,
+            ageBand: leadInventoryItems.ageBand,
             count: sql<number>`count(*)::int`,
           })
-          .from(inventoryItems)
-          .where(eq(inventoryItems.tenantId, tenantId))
-          .groupBy(inventoryItems.ageBand),
+          .from(leadInventoryItems)
+          .where(eq(leadInventoryItems.tenantId, tenantId))
+          .groupBy(leadInventoryItems.ageBand),
         db
           .select({
-            status: inventoryItems.status,
+            status: leadInventoryItems.inventoryStatus,
             count: sql<number>`count(*)::int`,
           })
-          .from(inventoryItems)
-          .where(eq(inventoryItems.tenantId, tenantId))
-          .groupBy(inventoryItems.status),
+          .from(leadInventoryItems)
+          .where(eq(leadInventoryItems.tenantId, tenantId))
+          .groupBy(leadInventoryItems.inventoryStatus),
       ]);
 
       return { byTemperature, byAgeBand, byStatus };
@@ -133,9 +133,9 @@ export async function inventoryRoutes(app: FastifyInstance) {
     try {
       const pools = await db
         .select()
-        .from(inventoryPools)
-        .where(eq(inventoryPools.tenantId, tenantId))
-        .orderBy(desc(inventoryPools.createdAt));
+        .from(leadInventoryPools)
+        .where(eq(leadInventoryPools.tenantId, tenantId))
+        .orderBy(desc(leadInventoryPools.createdAt));
 
       return { data: pools };
     } catch (err) {
@@ -169,13 +169,13 @@ export async function inventoryRoutes(app: FastifyInstance) {
 
     try {
       const [pool] = await db
-        .insert(inventoryPools)
+        .insert(leadInventoryPools)
         .values({
           tenantId,
           name,
           description: description ?? null,
-          filters: filters ?? null,
-          createdBy: userId,
+          filterCriteriaJson: filters ?? {},
+          poolType: 'manual',
         })
         .returning();
 
@@ -219,9 +219,9 @@ export async function inventoryRoutes(app: FastifyInstance) {
     try {
       // Verify pool belongs to tenant
       const [pool] = await db
-        .select({ id: inventoryPools.id })
-        .from(inventoryPools)
-        .where(and(eq(inventoryPools.id, poolId), eq(inventoryPools.tenantId, tenantId)))
+        .select({ id: leadInventoryPools.id })
+        .from(leadInventoryPools)
+        .where(and(eq(leadInventoryPools.id, poolId), eq(leadInventoryPools.tenantId, tenantId)))
         .limit(1);
 
       if (!pool) {
@@ -235,10 +235,10 @@ export async function inventoryRoutes(app: FastifyInstance) {
       const rows = inventoryItemIds.map((itemId) => ({
         poolId,
         inventoryItemId: itemId,
-        addedBy: userId,
+        addedBy: String(userId),
       }));
 
-      await db.insert(inventoryPoolMembers).values(rows).onConflictDoNothing();
+      await db.insert(leadPoolMemberships).values(rows).onConflictDoNothing();
 
       logger.info({ tenantId, poolId, count: inventoryItemIds.length, userId }, 'Items added to pool');
       return { message: `${inventoryItemIds.length} items added to pool`, poolId };
@@ -259,9 +259,9 @@ export async function inventoryRoutes(app: FastifyInstance) {
     try {
       const segments = await db
         .select()
-        .from(inventorySegments)
-        .where(eq(inventorySegments.tenantId, tenantId))
-        .orderBy(desc(inventorySegments.createdAt));
+        .from(leadSegments)
+        .where(eq(leadSegments.tenantId, tenantId))
+        .orderBy(desc(leadSegments.createdAt));
 
       return { data: segments };
     } catch (err) {
@@ -278,34 +278,33 @@ export async function inventoryRoutes(app: FastifyInstance) {
   app.post<{
     Body: {
       name: string;
-      description?: string;
-      criteria: Record<string, unknown>;
+      segmentType?: string;
+      rulesJson: Record<string, unknown>;
     };
   }>('/segments', async (request, reply) => {
-    const { tenantId, userId } = request.ctx;
-    const { name, description, criteria } = request.body;
+    const { tenantId } = request.ctx;
+    const { name, segmentType, rulesJson } = request.body;
 
-    if (!name || !criteria) {
+    if (!name || !rulesJson) {
       return reply.status(400).send({
         error: 'Bad Request',
-        message: 'name and criteria are required',
+        message: 'name and rulesJson are required',
         statusCode: 400,
       });
     }
 
     try {
       const [segment] = await db
-        .insert(inventorySegments)
+        .insert(leadSegments)
         .values({
           tenantId,
           name,
-          description: description ?? null,
-          criteria,
-          createdBy: userId,
+          segmentType: segmentType ?? 'custom',
+          rulesJson,
         })
         .returning();
 
-      logger.info({ tenantId, segmentId: segment.id, name, userId }, 'Inventory segment created');
+      logger.info({ tenantId, segmentId: segment.id, name }, 'Inventory segment created');
       return reply.status(201).send(segment);
     } catch (err) {
       logger.error({ err, tenantId, name }, 'Failed to create inventory segment');
@@ -324,15 +323,15 @@ export async function inventoryRoutes(app: FastifyInstance) {
     try {
       const rows = await db
         .select()
-        .from(inventoryItems)
+        .from(leadInventoryItems)
         .where(
           and(
-            eq(inventoryItems.tenantId, tenantId),
-            eq(inventoryItems.monetizable, true),
-            eq(inventoryItems.status, 'available'),
+            eq(leadInventoryItems.tenantId, tenantId),
+            eq(leadInventoryItems.monetizationEligible, true),
+            eq(leadInventoryItems.inventoryStatus, 'available'),
           ),
         )
-        .orderBy(desc(inventoryItems.estimatedValue));
+        .orderBy(desc(leadInventoryItems.valueScore));
 
       return { data: rows };
     } catch (err) {

@@ -1,14 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { db } from '@alh/db';
 import {
-  campaigns,
   campaignAssignments,
 } from '@alh/db/src/schema';
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { logger } from '@alh/observability';
 
 export async function campaignsRoutes(app: FastifyInstance) {
-  // GET /campaigns — list campaigns by tenant
+  // GET /campaigns — list distinct campaigns by tenant
   app.get<{
     Querystring: { page?: string; limit?: string };
   }>('/', async (request, reply) => {
@@ -20,16 +19,20 @@ export async function campaignsRoutes(app: FastifyInstance) {
     try {
       const [rows, countResult] = await Promise.all([
         db
-          .select()
-          .from(campaigns)
-          .where(eq(campaigns.tenantId, tenantId))
-          .orderBy(desc(campaigns.createdAt))
+          .select({
+            campaignName: campaignAssignments.campaignName,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(campaignAssignments)
+          .where(eq(campaignAssignments.tenantId, tenantId))
+          .groupBy(campaignAssignments.campaignName)
+          .orderBy(desc(sql`count(*)`))
           .limit(limit)
           .offset(offset),
         db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(campaigns)
-          .where(eq(campaigns.tenantId, tenantId)),
+          .select({ count: sql<number>`count(distinct ${campaignAssignments.campaignName})::int` })
+          .from(campaignAssignments)
+          .where(eq(campaignAssignments.tenantId, tenantId)),
       ]);
 
       const total = countResult[0]?.count ?? 0;
@@ -51,17 +54,17 @@ export async function campaignsRoutes(app: FastifyInstance) {
   // POST /campaigns/assign — assign leads to a campaign
   app.post<{
     Body: {
-      campaignId: number;
+      campaignName: string;
       canonicalLeadIds: number[];
     };
   }>('/assign', async (request, reply) => {
-    const { tenantId, userId } = request.ctx;
-    const { campaignId, canonicalLeadIds } = request.body;
+    const { tenantId } = request.ctx;
+    const { campaignName, canonicalLeadIds } = request.body;
 
-    if (!campaignId) {
+    if (!campaignName) {
       return reply.status(400).send({
         error: 'Bad Request',
-        message: 'campaignId is required',
+        message: 'campaignName is required',
         statusCode: 400,
       });
     }
@@ -75,41 +78,25 @@ export async function campaignsRoutes(app: FastifyInstance) {
     }
 
     try {
-      // Verify campaign belongs to tenant
-      const [campaign] = await db
-        .select({ id: campaigns.id })
-        .from(campaigns)
-        .where(and(eq(campaigns.id, campaignId), eq(campaigns.tenantId, tenantId)))
-        .limit(1);
-
-      if (!campaign) {
-        return reply.status(404).send({
-          error: 'Not Found',
-          message: `Campaign ${campaignId} not found`,
-          statusCode: 404,
-        });
-      }
-
       const rows = canonicalLeadIds.map((leadId) => ({
-        campaignId,
+        campaignName,
         canonicalLeadId: leadId,
         tenantId,
-        status: 'pending' as const,
-        assignedBy: userId,
+        status: 'assigned' as const,
       }));
 
       await db.insert(campaignAssignments).values(rows).onConflictDoNothing();
 
       logger.info(
-        { tenantId, campaignId, count: canonicalLeadIds.length, userId },
+        { tenantId, campaignName, count: canonicalLeadIds.length },
         'Leads assigned to campaign',
       );
       return reply.status(201).send({
         message: `${canonicalLeadIds.length} leads assigned to campaign`,
-        campaignId,
+        campaignName,
       });
     } catch (err) {
-      logger.error({ err, tenantId, campaignId }, 'Failed to assign leads to campaign');
+      logger.error({ err, tenantId, campaignName }, 'Failed to assign leads to campaign');
       return reply.status(500).send({
         error: 'Internal Server Error',
         message: 'Failed to assign leads to campaign',
@@ -135,7 +122,7 @@ export async function campaignsRoutes(app: FastifyInstance) {
       });
     }
 
-    const validStatuses = ['pending', 'active', 'contacted', 'responded', 'converted', 'rejected', 'paused'];
+    const validStatuses = ['assigned', 'active', 'contacted', 'responded', 'converted', 'rejected', 'paused'];
     if (!status || !validStatuses.includes(status)) {
       return reply.status(400).send({
         error: 'Bad Request',
@@ -166,7 +153,7 @@ export async function campaignsRoutes(app: FastifyInstance) {
 
       const [updated] = await db
         .update(campaignAssignments)
-        .set({ status, updatedBy: userId, updatedAt: new Date() })
+        .set({ status })
         .where(eq(campaignAssignments.id, assignmentId))
         .returning();
 
@@ -189,21 +176,22 @@ export async function campaignsRoutes(app: FastifyInstance) {
     try {
       const stats = await db
         .select({
-          campaignId: campaignAssignments.campaignId,
+          campaignName: campaignAssignments.campaignName,
           status: campaignAssignments.status,
           count: sql<number>`count(*)::int`,
         })
         .from(campaignAssignments)
         .where(eq(campaignAssignments.tenantId, tenantId))
-        .groupBy(campaignAssignments.campaignId, campaignAssignments.status);
+        .groupBy(campaignAssignments.campaignName, campaignAssignments.status);
 
       // Group by campaign
-      const byCampaign: Record<number, Record<string, number>> = {};
+      const byCampaign: Record<string, Record<string, number>> = {};
       for (const row of stats) {
-        if (!byCampaign[row.campaignId]) {
-          byCampaign[row.campaignId] = {};
+        const key = row.campaignName ?? 'unknown';
+        if (!byCampaign[key]) {
+          byCampaign[key] = {};
         }
-        byCampaign[row.campaignId][row.status] = row.count;
+        byCampaign[key][row.status] = row.count;
       }
 
       return { data: byCampaign };

@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "bullmq": "^5.30.0",
-    "ioredis": "^5.4.0",
+    "ioredis": "5.9.3",
     "@alh/observability": "workspace:*"
   },
   "devDependencies": {

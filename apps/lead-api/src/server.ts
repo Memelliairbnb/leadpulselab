@@ -63,10 +63,10 @@ export function buildServer() {
       'Unhandled route error',
     );
 
-    const statusCode = error.statusCode ?? 500;
+    const statusCode = (error as Error & { statusCode?: number }).statusCode ?? 500;
     reply.status(statusCode).send({
-      error: statusCode >= 500 ? 'Internal Server Error' : error.name,
-      message: statusCode >= 500 ? 'An unexpected error occurred' : error.message,
+      error: statusCode >= 500 ? 'Internal Server Error' : (error as Error).name,
+      message: statusCode >= 500 ? 'An unexpected error occurred' : (error as Error).message,
       statusCode,
     });
   });

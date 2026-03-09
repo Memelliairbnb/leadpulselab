@@ -1,5 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { tenantRepo } from '@alh/db/src/repositories/tenant-repo';
+import { db } from '@alh/db';
+import { tenantScoringModels } from '@alh/db/src/schema';
+import { verticalTemplates } from '@alh/db/src/schema/tenants';
+import { eq } from 'drizzle-orm';
 import { logger } from '@alh/observability';
 
 export async function tenantsRoutes(app: FastifyInstance) {
@@ -216,10 +220,6 @@ export async function tenantsRoutes(app: FastifyInstance) {
       }
 
       // Update model thresholds via direct DB call (tenantRepo could be extended)
-      const { db } = await import('@alh/db');
-      const { tenantScoringModels } = await import('@alh/db/src/schema');
-      const { eq } = await import('drizzle-orm');
-
       const updateData: Record<string, unknown> = {};
       if (request.body.claudeWeight !== undefined) updateData.claudeWeight = String(request.body.claudeWeight);
       if (request.body.rulesWeight !== undefined) updateData.rulesWeight = String(request.body.rulesWeight);
@@ -289,10 +289,6 @@ export async function tenantsRoutes(app: FastifyInstance) {
 
     try {
       // Load the template from the vertical-templates config
-      const { db } = await import('@alh/db');
-      const { verticalTemplates } = await import('@alh/db/src/schema/tenants');
-      const { eq } = await import('drizzle-orm');
-
       const [template] = await db
         .select()
         .from(verticalTemplates)

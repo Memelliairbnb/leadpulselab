@@ -16,7 +16,8 @@
     "@alh/db": "workspace:*",
     "@alh/queues": "workspace:*",
     "@alh/types": "workspace:*",
-    "@alh/observability": "workspace:*"
+    "@alh/observability": "workspace:*",
+    "drizzle-orm": "^0.38.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
