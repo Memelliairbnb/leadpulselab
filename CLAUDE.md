@@ -81,11 +81,28 @@ Source (RSS/scrape/manual/CSV/webhook)
 ## Workers
 - ingestion-worker — raw source processing
 - ai-analysis-worker — Claude classification + intent detection
-- enrichment-worker — identity resolution pipeline (NEW)
+- enrichment-worker — identity resolution pipeline
 - discovery-worker — automated source scanning
 - scrubber-worker — dedup + data cleaning
 - outreach-worker — message generation
 - scheduler — cron triggers
+- **instagram-discovery-worker** — DuckDuckGo + Instagram profile discovery (free)
+- **instagram-scrub-worker** — dedup, normalize, classify, score niche fit + contactability
+- **instagram-enrichment-worker** — MX email verify, website scrape, contact ranking, qualification
+
+## Instagram Pipeline (3-Worker)
+```
+DDGS Search (free) → raw_instagram_profiles
+  → Worker 1: Discovery (DuckDuckGo search + Instagram meta scraping)
+  → Worker 2: Scrub/Parse/Prequalify (dedup, classify, score)
+  → Worker 3: Enrich/Qualify (email MX verify, website scrape, contact ranking)
+  → qualified_lead OR partial_inventory OR discard
+```
+- Queues: instagram_discovery_queue, instagram_scrub_queue, instagram_enrichment_queue
+- Scoring: niche_fit (40%) + contactability (30%) + bio_quality (30%)
+- Threshold: ≥50 = enrich, ≥30 = partial, <30 = discard
+- DDGS Python script for bulk discovery (scripts/ddgs-instagram-discovery.py)
+- Free tools: DDGS, Beautiful Soup, DNS MX checks — zero paid APIs
 
 ## Build
 - All packages output to `dist/` (main: `./dist/index.js`)
@@ -105,4 +122,13 @@ Source (RSS/scrape/manual/CSV/webhook)
 
 ## Railway Services
 - lead-api, ingestion-worker, ai-analysis-worker, enrichment-worker, discovery-worker, scrubber-worker, outreach-worker, scheduler
+- instagram-discovery-worker, instagram-scrub-worker, instagram-enrichment-worker
 - Postgres + Redis
+
+## Open Source Tools (all free)
+- **DDGS** — DuckDuckGo Search for Instagram profile discovery (Python)
+- **Beautiful Soup / node-html-parser** — HTML parsing for meta tags
+- **DNS MX checks** — Free email verification via Node.js dns module
+- **Playwright** (planned) — Headless browser for JS-heavy sites
+- **Crawl4AI** (planned) — AI-powered data extraction
+- **Scrapy** (planned) — Large-scale structured crawling
