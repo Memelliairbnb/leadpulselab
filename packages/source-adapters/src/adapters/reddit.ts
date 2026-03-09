@@ -34,7 +34,7 @@ export class RedditAdapter implements SourceAdapter {
 
     const clientId = process.env.REDDIT_CLIENT_ID;
     const clientSecret = process.env.REDDIT_CLIENT_SECRET;
-    const userAgent = process.env.REDDIT_USER_AGENT || 'ai-lead-hunter/1.0';
+    const userAgent = process.env.REDDIT_USER_AGENT || 'leadpulselab/1.0';
 
     if (!clientId || !clientSecret) {
       throw new Error('Reddit client ID and secret are required');
@@ -60,7 +60,7 @@ export class RedditAdapter implements SourceAdapter {
 
   async fetch(params: FetchParams): Promise<RawSourcePayload[]> {
     const token = await this.getAccessToken();
-    const userAgent = process.env.REDDIT_USER_AGENT || 'ai-lead-hunter/1.0';
+    const userAgent = process.env.REDDIT_USER_AGENT || 'leadpulselab/1.0';
     const results: RawSourcePayload[] = [];
 
     for (const keyword of params.keywords) {

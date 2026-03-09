@@ -5,8 +5,8 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
-  title: 'AI Lead Hunter',
-  description: 'Intelligent lead discovery and qualification platform',
+  title: 'LeadPulseLab',
+  description: 'AI Lead Intelligence & Growth Engine',
 };
 
 export default function RootLayout({

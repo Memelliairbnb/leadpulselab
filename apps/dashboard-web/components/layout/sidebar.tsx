@@ -81,7 +81,7 @@ export function Sidebar() {
     <aside className="w-56 h-screen bg-surface-raised border-r border-border flex flex-col fixed left-0 top-0">
       <div className="px-5 py-5 border-b border-border">
         <h1 className="text-sm font-semibold text-text-primary tracking-wide uppercase">
-          AI Lead Hunter
+          LeadPulseLab
         </h1>
       </div>
 

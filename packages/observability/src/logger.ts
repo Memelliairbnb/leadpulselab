@@ -6,7 +6,7 @@ export const logger = pino({
     level: (label) => ({ level: label }),
   },
   base: {
-    service: process.env.SERVICE_NAME || 'ai-lead-hunter',
+    service: process.env.SERVICE_NAME || 'leadpulselab',
     env: process.env.NODE_ENV || 'development',
   },
   transport:

@@ -40,7 +40,7 @@ export default function LoginPage() {
     <div className="space-y-8">
       <div className="text-center">
         <h1 className="text-2xl font-semibold text-text-primary tracking-tight">
-          AI Lead Hunter
+          LeadPulseLab
         </h1>
         <p className="mt-2 text-sm text-text-secondary">
           Sign in to your operations dashboard
