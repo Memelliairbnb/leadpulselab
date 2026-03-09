@@ -158,6 +158,137 @@ class ApiClient {
   async getAnalyticsOverview(): Promise<AnalyticsOverview> {
     return this.request('analytics/overview');
   }
+
+  async getYieldMetrics(): Promise<any> {
+    return this.request('analytics/yield');
+  }
+
+  // ---- Canonical Leads (Inventory) ----
+
+  async getCanonicalLeads(filters: Record<string, any> = {}): Promise<any> {
+    const params = new URLSearchParams();
+    for (const [key, val] of Object.entries(filters)) {
+      if (val !== undefined && val !== null && val !== '') {
+        params.set(key, String(val));
+      }
+    }
+    return this.request(`canonical-leads?${params.toString()}`);
+  }
+
+  async getCanonicalLead(id: number): Promise<any> {
+    return this.request(`canonical-leads/${id}`);
+  }
+
+  // ---- Inventory ----
+
+  async getInventory(filters: Record<string, any> = {}): Promise<any> {
+    const params = new URLSearchParams();
+    for (const [key, val] of Object.entries(filters)) {
+      if (val !== undefined && val !== null && val !== '') {
+        params.set(key, String(val));
+      }
+    }
+    return this.request(`inventory?${params.toString()}`);
+  }
+
+  async getInventoryStats(): Promise<any> {
+    return this.request('inventory/stats');
+  }
+
+  async getInventoryPools(): Promise<any> {
+    return this.request('inventory/pools');
+  }
+
+  // ---- Discovery ----
+
+  async getDiscoveryQueryRuns(page = 1, limit = 25): Promise<any> {
+    return this.request(`discovery/query-runs?page=${page}&limit=${limit}`);
+  }
+
+  async getSourceHealth(): Promise<any> {
+    return this.request('discovery/source-health');
+  }
+
+  async triggerDiscoveryScan(sourceId?: number): Promise<any> {
+    return this.request('discovery/scan', {
+      method: 'POST',
+      body: JSON.stringify({ sourceId }),
+    });
+  }
+
+  // ---- Duplicates ----
+
+  async getDuplicateCandidates(page = 1, limit = 25): Promise<any> {
+    return this.request(`duplicates?page=${page}&limit=${limit}`);
+  }
+
+  async resolveDuplicate(id: number, resolution: string): Promise<any> {
+    return this.request(`duplicates/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution }),
+    });
+  }
+
+  // ---- Campaigns ----
+
+  async getCampaigns(filters: Record<string, any> = {}): Promise<any> {
+    const params = new URLSearchParams();
+    for (const [key, val] of Object.entries(filters)) {
+      if (val !== undefined && val !== null && val !== '') {
+        params.set(key, String(val));
+      }
+    }
+    return this.request(`campaigns?${params.toString()}`);
+  }
+
+  async getCampaign(id: number): Promise<any> {
+    return this.request(`campaigns/${id}`);
+  }
+
+  async assignToCampaign(data: {
+    campaignId: number;
+    leadIds: number[];
+  }): Promise<any> {
+    return this.request('campaigns/assign', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // ---- Pipeline ----
+
+  async getPipelineLeads(): Promise<any> {
+    return this.request('pipeline/leads');
+  }
+
+  // ---- Inbox ----
+
+  async getConversations(filters: Record<string, any> = {}): Promise<any> {
+    const params = new URLSearchParams();
+    for (const [key, val] of Object.entries(filters)) {
+      if (val !== undefined && val !== null && val !== '') {
+        params.set(key, String(val));
+      }
+    }
+    return this.request(`inbox/conversations?${params.toString()}`);
+  }
+
+  async getConversationMessages(conversationId: number): Promise<any> {
+    return this.request(`inbox/conversations/${conversationId}/messages`);
+  }
+
+  async sendReply(conversationId: number, body: string): Promise<any> {
+    return this.request(`inbox/conversations/${conversationId}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+  }
+
+  async approveAiDraft(conversationId: number, draftId: number): Promise<any> {
+    return this.request(`inbox/conversations/${conversationId}/drafts/${draftId}/approve`, {
+      method: 'POST',
+    });
+  }
 }
 
 export class ApiError extends Error {

@@ -9,6 +9,11 @@ import { jobsRoutes } from './routes/jobs';
 import { analyticsRoutes } from './routes/analytics';
 import { outreachRoutes } from './routes/outreach';
 import { tenantsRoutes } from './routes/tenants';
+import { canonicalRoutes } from './routes/canonical';
+import { inventoryRoutes } from './routes/inventory';
+import { discoveryRoutes } from './routes/discovery';
+import { campaignsRoutes } from './routes/campaigns';
+import { adminRoutes } from './routes/admin';
 
 export function buildServer() {
   const app = Fastify({
@@ -44,6 +49,11 @@ export function buildServer() {
     instance.register(analyticsRoutes, { prefix: '/analytics' });
     instance.register(outreachRoutes, { prefix: '/outreach' });
     instance.register(tenantsRoutes, { prefix: '/tenant' });
+    instance.register(canonicalRoutes, { prefix: '/canonical-leads' });
+    instance.register(inventoryRoutes, { prefix: '/inventory' });
+    instance.register(discoveryRoutes, { prefix: '/discovery' });
+    instance.register(campaignsRoutes, { prefix: '/campaigns' });
+    instance.register(adminRoutes, { prefix: '/admin' });
   }, { prefix: '/api' });
 
   // Global error handler

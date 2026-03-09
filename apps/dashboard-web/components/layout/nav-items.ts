@@ -6,13 +6,15 @@ export interface NavItem {
 }
 
 export const navItems: NavItem[] = [
-  { label: 'Overview', href: '/', icon: 'grid' },
-  { label: 'Leads', href: '/leads', icon: 'users' },
-  { label: 'Outreach', href: '/outreach', icon: 'send' },
+  { label: 'Dashboard', href: '/', icon: 'grid' },
+  { label: 'Opportunities', href: '/leads', icon: 'users' },
+  { label: 'Discovery', href: '/discovery', icon: 'search' },
+  { label: 'Campaigns', href: '/campaigns', icon: 'send' },
+  { label: 'Inbox', href: '/inbox', icon: 'inbox' },
+  { label: 'Pipelines', href: '/pipelines', icon: 'columns' },
   { label: 'Keywords', href: '/keywords', icon: 'hash' },
   { label: 'Sources', href: '/sources', icon: 'radio' },
-  { label: 'Scans', href: '/scans', icon: 'search' },
-  { label: 'Jobs', href: '/jobs', icon: 'activity' },
+  { label: 'Inventory', href: '/inventory', icon: 'package' },
   { label: 'Analytics', href: '/analytics', icon: 'bar-chart' },
   { label: 'Settings', href: '/settings', icon: 'settings' },
 ];
