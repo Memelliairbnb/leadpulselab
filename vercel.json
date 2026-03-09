@@ -1,9 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "pnpm turbo build --filter=@alh/dashboard-web",
+  "buildCommand": "pnpm turbo build --filter=@alh/dashboard-web && cp -r apps/dashboard-web/.next .next",
   "installCommand": "pnpm install",
-  "outputDirectory": "apps/dashboard-web/.next",
   "headers": [
     {
       "source": "/api/(.*)",
