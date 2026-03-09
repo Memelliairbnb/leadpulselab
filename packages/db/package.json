@@ -4,6 +4,13 @@
   "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./src/schema": "./dist/schema/index.js",
+    "./src/schema/*": "./dist/schema/*.js",
+    "./src/repositories/*": "./dist/repositories/*.js",
+    "./src/*": "./dist/*.js"
+  },
   "scripts": {
     "build": "tsc",
     "lint": "tsc --noEmit",
