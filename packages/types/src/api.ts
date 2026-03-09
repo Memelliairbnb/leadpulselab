@@ -19,6 +19,8 @@ export interface LeadFilters {
   leadType?: string;
   intentLevel?: string;
   platform?: string;
+  resolutionStatus?: string;
+  resolutionTab?: 'qualified' | 'in_progress' | 'inventory' | 'all';
   minScore?: number;
   maxScore?: number;
   assignedTo?: number;
@@ -47,6 +49,14 @@ export interface AnalyticsOverview {
     failed: number;
   };
   outreachPending: number;
+  /** Resolution pipeline stats — optional for backward compatibility */
+  resolution?: {
+    totalSignals: number;
+    inResolution: number;
+    qualified: number;
+    inventory: number;
+    resolutionRate: number;
+  };
 }
 
 export interface AuthSession {

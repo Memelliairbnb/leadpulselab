@@ -4,56 +4,62 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
 import { ScoreBadge } from '@/components/shared/score-badge';
-import { TemperatureBadge } from '@/components/shared/temperature-badge';
-import { LifecycleBadge } from '@/components/shared/lifecycle-badge';
+import { ResolutionBadge } from '@/components/shared/resolution-badge';
 import { getLeadDisplayName } from '@/lib/lead-utils';
-import type { QualifiedLead } from '@alh/types';
+import { formatRelativeTime } from '@/lib/utils';
+import type { QualifiedLead, ResolutionStatus } from '@alh/types';
 
-interface PipelineLead {
-  id: number;
-  name: string;
-  company: string | null;
-  score: number;
-  intentLevel: string;
-  platform: string;
-  temperature: 'hot' | 'warm' | 'aged' | 'cold';
-  lifecycleStage: string;
-  daysInStage: number;
+interface PipelineColumn {
+  key: string;
+  label: string;
+  color: string;
+  statuses: ResolutionStatus[];
 }
 
-const STAGES = ['discovered', 'qualified', 'contacted', 'replied', 'converted'] as const;
-
-const stageColors: Record<string, string> = {
-  discovered: 'border-sky-500/30',
-  qualified: 'border-indigo-500/30',
-  contacted: 'border-purple-500/30',
-  replied: 'border-amber-500/30',
-  converted: 'border-emerald-500/30',
-};
+const PIPELINE_COLUMNS: PipelineColumn[] = [
+  {
+    key: 'signal',
+    label: 'Signal Found',
+    color: 'border-gray-500/30',
+    statuses: ['signal_found'],
+  },
+  {
+    key: 'resolving',
+    label: 'Resolving',
+    color: 'border-indigo-500/30',
+    statuses: ['profile_extracted', 'identity_candidate', 'contact_candidate'],
+  },
+  {
+    key: 'contact',
+    label: 'Contact Found',
+    color: 'border-cyan-500/30',
+    statuses: ['email_found', 'phone_found'],
+  },
+  {
+    key: 'qualified',
+    label: 'Qualified',
+    color: 'border-emerald-500/30',
+    statuses: ['qualified'],
+  },
+  {
+    key: 'inventory',
+    label: 'Inventory',
+    color: 'border-amber-500/30',
+    statuses: ['partial_inventory'],
+  },
+];
 
 export default function PipelinesPage() {
   const router = useRouter();
-  const [leads, setLeads] = useState<PipelineLead[]>([]);
+  const [leads, setLeads] = useState<QualifiedLead[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.getPipelineLeads();
-      // API returns PaginatedResponse shape with .data array
       const items = res.data ?? res.items ?? res ?? [];
-      // Map qualified lead fields to pipeline lead shape
-      setLeads(items.map((lead: any) => ({
-        id: lead.id,
-        name: getLeadDisplayName(lead as QualifiedLead),
-        company: lead.companyName || null,
-        score: lead.leadScore ?? 0,
-        intentLevel: lead.intentLevel ?? 'low',
-        platform: lead.platform ?? 'unknown',
-        temperature: lead.leadScore >= 80 ? 'hot' : lead.leadScore >= 60 ? 'warm' : lead.leadScore >= 35 ? 'aged' : 'cold',
-        lifecycleStage: lead.status === 'new' ? 'discovered' : lead.status === 'approved' ? 'qualified' : lead.status === 'outreach_sent' ? 'contacted' : lead.status === 'nurturing' ? 'replied' : lead.status === 'converted' ? 'converted' : 'discovered',
-        daysInStage: lead.createdAt ? Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / 86400000) : 0,
-      })));
+      setLeads(items);
     } catch (err) {
       console.error('Failed to fetch pipeline:', err);
     } finally {
@@ -73,33 +79,32 @@ export default function PipelinesPage() {
     );
   }
 
-  const columns = STAGES.map((stage) => ({
-    stage,
-    leads: leads.filter((l) => l.lifecycleStage === stage),
+  const columns = PIPELINE_COLUMNS.map((col) => ({
+    ...col,
+    leads: leads.filter((l) =>
+      col.statuses.includes((l.resolutionStatus ?? 'signal_found') as ResolutionStatus)
+    ),
   }));
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-text-primary">Pipeline</h1>
+        <h1 className="text-lg font-semibold text-text-primary">Resolution Pipeline</h1>
         <p className="text-sm text-text-muted mt-0.5">
-          Lifecycle stages from discovery to conversion
+          Signal capture through identity resolution to qualified lead
         </p>
       </div>
 
       {/* Kanban Board */}
-      {/* TODO: Add drag-and-drop with @dnd-kit or react-beautiful-dnd */}
       <div className="flex gap-4 overflow-x-auto pb-4">
-        {columns.map(({ stage, leads: columnLeads }) => (
+        {columns.map(({ key, label, color, leads: columnLeads }) => (
           <div
-            key={stage}
-            className={`flex-shrink-0 w-72 bg-surface-raised border rounded-lg ${stageColors[stage] ?? 'border-border'}`}
+            key={key}
+            className={`flex-shrink-0 w-72 bg-surface-raised border rounded-lg ${color}`}
           >
             {/* Column Header */}
             <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <LifecycleBadge stage={stage as any} />
-              </div>
+              <span className="text-sm font-medium text-text-primary">{label}</span>
               <span className="text-xs text-text-muted tabular-nums bg-surface-overlay px-2 py-0.5 rounded-full">
                 {columnLeads.length}
               </span>
@@ -119,30 +124,46 @@ export default function PipelinesPage() {
                     <div className="flex items-start justify-between mb-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-text-primary font-medium truncate">
-                          {lead.name}
+                          {getLeadDisplayName(lead)}
                         </p>
-                        {lead.company && (
-                          <p className="text-xs text-text-muted truncate">{lead.company}</p>
+                        {lead.companyName && (
+                          <p className="text-xs text-text-muted truncate">{lead.companyName}</p>
                         )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <ScoreBadge score={lead.score} intentLevel={lead.intentLevel as any} />
-                      <TemperatureBadge temperature={lead.temperature} />
+                      <ScoreBadge score={lead.leadScore} intentLevel={lead.intentLevel} />
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border text-text-muted capitalize">
                         {lead.platform}
                       </span>
                     </div>
+                    {/* Contact info icons */}
                     <div className="mt-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {lead.resolvedEmail && (
+                          <span title={lead.emailVerified ? 'Verified email' : 'Email found'} className="flex items-center gap-0.5">
+                            <svg className={`w-3.5 h-3.5 ${lead.emailVerified ? 'text-emerald-400' : 'text-text-muted'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                          </span>
+                        )}
+                        {lead.resolvedPhone && (
+                          <span title={lead.phoneVerified ? 'Verified phone' : 'Phone found'} className="flex items-center gap-0.5">
+                            <svg className={`w-3.5 h-3.5 ${lead.phoneVerified ? 'text-emerald-400' : 'text-text-muted'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                            </svg>
+                          </span>
+                        )}
+                        {lead.profileUrl && (
+                          <span title="Profile URL" className="flex items-center gap-0.5">
+                            <svg className="w-3.5 h-3.5 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs text-text-muted tabular-nums">
-                        {lead.daysInStage}d in stage
-                      </span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize ${
-                        lead.intentLevel === 'high' ? 'bg-success/10 text-success' :
-                        lead.intentLevel === 'medium' ? 'bg-warning/10 text-warning' :
-                        'bg-surface-overlay text-text-muted'
-                      }`}>
-                        {lead.intentLevel} intent
+                        {formatRelativeTime(lead.createdAt)}
                       </span>
                     </div>
                   </div>

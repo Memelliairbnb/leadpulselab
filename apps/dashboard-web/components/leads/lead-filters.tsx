@@ -36,6 +36,19 @@ const platformOptions = [
   { value: 'twitter', label: 'Twitter/X' },
 ];
 
+const resolutionOptions = [
+  { value: '', label: 'All Resolution' },
+  { value: 'signal_found', label: 'Signal Found' },
+  { value: 'profile_extracted', label: 'Profile Extracted' },
+  { value: 'identity_candidate', label: 'Identity Candidate' },
+  { value: 'contact_candidate', label: 'Contact Candidate' },
+  { value: 'email_found', label: 'Email Found' },
+  { value: 'phone_found', label: 'Phone Found' },
+  { value: 'qualified', label: 'Qualified' },
+  { value: 'partial_inventory', label: 'Inventory' },
+  { value: 'discarded', label: 'Discarded' },
+];
+
 const selectClass =
   'bg-surface-raised border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent appearance-none cursor-pointer';
 
@@ -90,7 +103,19 @@ export function LeadFilterBar({ filters, onChange }: LeadFilterBarProps) {
         ))}
       </select>
 
-      {(filters.status || filters.intentLevel || filters.platform || filters.search) && (
+      <select
+        value={filters.resolutionStatus ?? ''}
+        onChange={(e) => update({ resolutionStatus: e.target.value || undefined })}
+        className={selectClass}
+      >
+        {resolutionOptions.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+
+      {(filters.status || filters.intentLevel || filters.platform || filters.resolutionStatus || filters.search) && (
         <button
           onClick={() => onChange({ page: 1, limit: filters.limit })}
           className="text-xs text-text-muted hover:text-text-primary transition-colors"

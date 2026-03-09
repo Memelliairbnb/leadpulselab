@@ -55,9 +55,26 @@ export interface QualifiedLead {
   duplicateConfidence: number | null;
   sourceContentDate: Date | null;
   lastRescoredAt: Date | null;
+  resolutionStatus: ResolutionStatus;
+  identityConfidence: number;
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  resolvedEmail: string | null;
+  resolvedPhone: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type ResolutionStatus =
+  | 'signal_found'
+  | 'profile_extracted'
+  | 'identity_candidate'
+  | 'contact_candidate'
+  | 'email_found'
+  | 'phone_found'
+  | 'qualified'
+  | 'partial_inventory'
+  | 'discarded';
 
 export type IntentLevel = 'high' | 'medium' | 'low' | 'archive';
 

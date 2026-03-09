@@ -34,6 +34,14 @@ export default function OverviewPage() {
     );
   }
 
+  const resolution = overview.resolution ?? {
+    totalSignals: 0,
+    inResolution: 0,
+    qualified: 0,
+    inventory: 0,
+    resolutionRate: 0,
+  };
+
   const stats = [
     {
       label: 'Total Leads',
@@ -62,6 +70,44 @@ export default function OverviewPage() {
     },
   ];
 
+  const resolutionStats = [
+    {
+      label: 'Signals Captured',
+      value: resolution.totalSignals.toLocaleString(),
+      sub: 'Total discussion sources',
+      color: 'text-gray-400',
+      borderColor: 'border-gray-500/30',
+    },
+    {
+      label: 'In Resolution',
+      value: resolution.inResolution.toLocaleString(),
+      sub: 'Being enriched',
+      color: 'text-indigo-400',
+      borderColor: 'border-indigo-500/30',
+    },
+    {
+      label: 'Qualified',
+      value: resolution.qualified.toLocaleString(),
+      sub: 'Verified contact info',
+      color: 'text-emerald-400',
+      borderColor: 'border-emerald-500/30',
+    },
+    {
+      label: 'Inventory',
+      value: resolution.inventory.toLocaleString(),
+      sub: 'Needs manual work',
+      color: 'text-amber-400',
+      borderColor: 'border-amber-500/30',
+    },
+    {
+      label: 'Resolution Rate',
+      value: `${resolution.resolutionRate}%`,
+      sub: 'Signals to qualified',
+      color: resolution.resolutionRate >= 50 ? 'text-emerald-400' : resolution.resolutionRate >= 25 ? 'text-amber-400' : 'text-red-400',
+      borderColor: resolution.resolutionRate >= 50 ? 'border-emerald-500/30' : resolution.resolutionRate >= 25 ? 'border-amber-500/30' : 'border-red-500/30',
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div>
@@ -82,6 +128,25 @@ export default function OverviewPage() {
             <p className={`text-xs mt-1 ${stat.accent ?? 'text-text-muted'}`}>{stat.sub}</p>
           </div>
         ))}
+      </div>
+
+      {/* Resolution Pipeline Stats */}
+      <div className="bg-surface-raised border border-border rounded-lg p-5">
+        <h2 className="text-sm font-medium text-text-primary mb-4">Resolution Pipeline</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          {resolutionStats.map((stat) => (
+            <div
+              key={stat.label}
+              className={`border rounded-lg px-4 py-3 ${stat.borderColor}`}
+            >
+              <p className="text-xs text-text-muted">{stat.label}</p>
+              <p className={`text-xl font-semibold mt-1 tabular-nums ${stat.color}`}>
+                {stat.value}
+              </p>
+              <p className="text-xs text-text-muted mt-0.5">{stat.sub}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="bg-surface-raised border border-border rounded-lg p-5">

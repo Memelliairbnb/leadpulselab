@@ -7,13 +7,30 @@ import { api } from '@/lib/api-client';
 import { DataTable, type Column } from '@/components/shared/data-table';
 import { ScoreBadge } from '@/components/shared/score-badge';
 import { StatusChip } from '@/components/shared/status-chip';
+import { ResolutionBadge } from '@/components/shared/resolution-badge';
 import { LeadFilterBar } from '@/components/leads/lead-filters';
 import { formatRelativeTime } from '@/lib/utils';
 import { getLeadDisplayName } from '@/lib/lead-utils';
 
+type ResolutionTab = 'qualified' | 'in_progress' | 'inventory' | 'all';
+
+const RESOLUTION_TABS: { key: ResolutionTab; label: string }[] = [
+  { key: 'qualified', label: 'Qualified' },
+  { key: 'in_progress', label: 'In Progress' },
+  { key: 'inventory', label: 'Inventory' },
+  { key: 'all', label: 'All' },
+];
+
 export default function LeadsPage() {
   const router = useRouter();
-  const [filters, setFilters] = useState<LeadFilters>({ page: 1, limit: 25, sortBy: 'createdAt', sortOrder: 'desc' });
+  const [activeTab, setActiveTab] = useState<ResolutionTab>('qualified');
+  const [filters, setFilters] = useState<LeadFilters>({
+    page: 1,
+    limit: 25,
+    sortBy: 'createdAt',
+    sortOrder: 'desc',
+    resolutionTab: 'qualified',
+  });
   const [data, setData] = useState<PaginatedResponse<QualifiedLead> | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -32,6 +49,16 @@ export default function LeadsPage() {
   useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
+
+  function handleTabChange(tab: ResolutionTab) {
+    setActiveTab(tab);
+    setFilters((prev) => ({
+      ...prev,
+      page: 1,
+      resolutionTab: tab,
+      resolutionStatus: undefined,
+    }));
+  }
 
   function handleSort(key: string) {
     setFilters((prev) => ({
@@ -72,6 +99,13 @@ export default function LeadsPage() {
       sortable: true,
       render: (lead) => (
         <ScoreBadge score={lead.leadScore} intentLevel={lead.intentLevel} />
+      ),
+    },
+    {
+      key: 'resolutionStatus',
+      label: 'Resolution',
+      render: (lead) => (
+        <ResolutionBadge status={lead.resolutionStatus ?? 'signal_found'} />
       ),
     },
     {
@@ -127,6 +161,23 @@ export default function LeadsPage() {
             Add Lead
           </button>
         </div>
+      </div>
+
+      {/* Resolution tabs */}
+      <div className="flex items-center gap-1 bg-surface-raised border border-border rounded-lg p-1">
+        {RESOLUTION_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => handleTabChange(tab.key)}
+            className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
+              activeTab === tab.key
+                ? 'bg-accent text-white font-medium'
+                : 'text-text-secondary hover:text-text-primary hover:bg-surface-overlay'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       <LeadFilterBar filters={filters} onChange={setFilters} />

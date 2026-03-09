@@ -213,6 +213,9 @@ export async function processLeadAnalysis(job: Job<LeadAnalysisJobData>) {
         city: null,
         state: null,
         status: "new",
+        // Identity resolution: AI analysis captures the signal only.
+        // The enrichment worker will advance through resolution stages.
+        resolutionStatus: "signal_found",
       })
       .returning();
 
@@ -248,6 +251,21 @@ export async function processLeadAnalysis(job: Job<LeadAnalysisJobData>) {
         jobId: `dedupe-${qualifiedLead.id}`,
         attempts: 3,
         backoff: { type: "exponential", delay: 3000 },
+      }
+    );
+
+    // Push to enrichment queue for identity resolution
+    const enrichmentQueue = getQueue(QUEUE_NAMES.LEAD_ENRICHMENT);
+    await enrichmentQueue.add(
+      "enrich-lead",
+      {
+        qualifiedLeadId: qualifiedLead.id,
+        tenantId,
+      },
+      {
+        jobId: `enrich-${qualifiedLead.id}`,
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5000 },
       }
     );
 

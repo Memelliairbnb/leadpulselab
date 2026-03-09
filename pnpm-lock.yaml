@@ -171,6 +171,19 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/identity-resolution:
+    dependencies:
+      '@alh/observability':
+        specifier: workspace:*
+        version: link:../observability
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.37
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/observability:
     dependencies:
       pino:
@@ -348,6 +361,37 @@ importers:
       ioredis:
         specifier: ^5.4.0
         version: 5.10.0
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  workers/enrichment-worker:
+    dependencies:
+      '@alh/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@alh/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@alh/queues':
+        specifier: workspace:*
+        version: link:../../packages/queues
+      '@alh/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      bullmq:
+        specifier: ^5.30.0
+        version: 5.70.4
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
+      ioredis:
+        specifier: ^5.4.0
+        version: 5.9.3
     devDependencies:
       tsx:
         specifier: ^4.19.0

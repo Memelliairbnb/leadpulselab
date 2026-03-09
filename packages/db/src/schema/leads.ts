@@ -79,6 +79,19 @@ export const qualifiedLeads = pgTable(
     duplicateConfidence: numeric('duplicate_confidence', { precision: 3, scale: 2 }),
     sourceContentDate: timestamp('source_content_date', { withTimezone: true }),
     lastRescoredAt: timestamp('last_rescored_at', { withTimezone: true }),
+    // Identity resolution workflow columns
+    resolutionStatus: varchar('resolution_status', { length: 30 }).notNull().default('signal_found'),
+    identityConfidence: integer('identity_confidence').default(0),
+    emailVerified: boolean('email_verified').default(false),
+    phoneVerified: boolean('phone_verified').default(false),
+    resolvedEmail: varchar('resolved_email', { length: 255 }),
+    resolvedPhone: varchar('resolved_phone', { length: 50 }),
+    resolvedWebsite: text('resolved_website'),
+    resolvedCompany: varchar('resolved_company', { length: 255 }),
+    resolvedLocation: varchar('resolved_location', { length: 255 }),
+    crossPlatformProfilesJson: jsonb('cross_platform_profiles_json').default([]),
+    resolutionAttemptsCount: integer('resolution_attempts_count').default(0),
+    lastResolutionAt: timestamp('last_resolution_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -92,6 +105,7 @@ export const qualifiedLeads = pgTable(
     index('idx_qualified_leads_created').on(table.createdAt),
     index('idx_qualified_leads_platform').on(table.platform),
     index('idx_qualified_leads_needs_review').on(table.needsReview),
+    index('idx_qualified_leads_resolution_status').on(table.resolutionStatus),
   ],
 );
 
@@ -169,6 +183,27 @@ export const leadSignals = pgTable(
     index('idx_lead_signals_qualified_lead').on(table.qualifiedLeadId),
     index('idx_lead_signals_intent_type').on(table.intentType),
     index('idx_lead_signals_author_name').on(table.authorName),
+  ],
+);
+
+export const leadResolutionLog = pgTable(
+  'lead_resolution_log',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id').notNull().references(() => tenants.id),
+    qualifiedLeadId: integer('qualified_lead_id').notNull().references(() => qualifiedLeads.id, { onDelete: 'cascade' }),
+    stepName: varchar('step_name', { length: 50 }).notNull(),
+    stepStatus: varchar('step_status', { length: 20 }).notNull(),
+    inputDataJson: jsonb('input_data_json'),
+    outputDataJson: jsonb('output_data_json'),
+    durationMs: integer('duration_ms'),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_lead_resolution_log_qualified_lead').on(table.qualifiedLeadId),
+    index('idx_lead_resolution_log_step_name').on(table.stepName),
+    index('idx_lead_resolution_log_created').on(table.createdAt),
   ],
 );
 
