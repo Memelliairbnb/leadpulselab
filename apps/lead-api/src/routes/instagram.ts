@@ -12,6 +12,9 @@ import { logger } from '@alh/observability';
 import { claudeClient } from '@alh/ai';
 import { igLogin, igVerify2FA, igGetProfile } from '../services/instagram-auth';
 
+const INSTAGRAM_APP_ID = process.env.INSTAGRAM_APP_ID;
+const INSTAGRAM_APP_SECRET = process.env.INSTAGRAM_APP_SECRET;
+
 export async function instagramRoutes(app: FastifyInstance) {
   // ─── POST /instagram/connect ────────────────────────────────────────────────
   app.post<{
@@ -230,6 +233,190 @@ export async function instagramRoutes(app: FastifyInstance) {
     } catch (err) {
       logger.error({ err, tenantId, username }, 'Instagram 2FA verification failed');
       const message = err instanceof Error ? err.message : '2FA verification failed';
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message,
+        statusCode: 500,
+      });
+    }
+  });
+
+  // ─── POST /instagram/oauth/callback ─────────────────────────────────────────
+  app.post<{
+    Body: { code: string; redirect_uri: string };
+  }>('/oauth/callback', async (request, reply) => {
+    const { tenantId } = request.ctx;
+    const { code, redirect_uri } = request.body;
+
+    if (!code || !redirect_uri) {
+      return reply.status(400).send({
+        error: 'Bad Request',
+        message: 'Authorization code and redirect_uri are required',
+        statusCode: 400,
+      });
+    }
+
+    if (!INSTAGRAM_APP_ID || !INSTAGRAM_APP_SECRET) {
+      logger.error('Instagram OAuth: INSTAGRAM_APP_ID or INSTAGRAM_APP_SECRET not configured');
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Instagram OAuth is not configured. Contact support.',
+        statusCode: 500,
+      });
+    }
+
+    try {
+      // Step 1: Exchange code for short-lived token
+      const tokenRes = await fetch('https://api.instagram.com/oauth/access_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: INSTAGRAM_APP_ID,
+          client_secret: INSTAGRAM_APP_SECRET,
+          grant_type: 'authorization_code',
+          redirect_uri,
+          code,
+        }),
+      });
+
+      const tokenData = await tokenRes.json() as {
+        access_token?: string;
+        user_id?: number;
+        error_message?: string;
+        permissions?: string[];
+      };
+
+      if (!tokenRes.ok || !tokenData.access_token) {
+        logger.error({ tokenData }, 'Instagram OAuth: token exchange failed');
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: tokenData.error_message || 'Failed to exchange authorization code',
+          statusCode: 400,
+        });
+      }
+
+      const shortLivedToken = tokenData.access_token;
+      const igUserId = String(tokenData.user_id);
+
+      // Step 2: Exchange for long-lived token (60 days)
+      const longTokenRes = await fetch(
+        `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${INSTAGRAM_APP_SECRET}&access_token=${shortLivedToken}`,
+      );
+      const longTokenData = await longTokenRes.json() as {
+        access_token?: string;
+        token_type?: string;
+        expires_in?: number;
+        error?: { message?: string };
+      };
+
+      const accessToken = longTokenData.access_token || shortLivedToken;
+      const expiresIn = longTokenData.expires_in || 3600;
+      const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
+
+      // Step 3: Fetch user profile using the token
+      const profileRes = await fetch(
+        `https://graph.instagram.com/v22.0/me?fields=user_id,username,name,account_type,profile_picture_url,followers_count,follows_count,media_count,biography&access_token=${accessToken}`,
+      );
+      const profile = await profileRes.json() as {
+        user_id?: string;
+        username?: string;
+        name?: string;
+        account_type?: string;
+        profile_picture_url?: string;
+        followers_count?: number;
+        follows_count?: number;
+        media_count?: number;
+        biography?: string;
+        error?: { message?: string };
+      };
+
+      if (!profileRes.ok || profile.error) {
+        logger.error({ profile }, 'Instagram OAuth: profile fetch failed');
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: profile.error?.message || 'Failed to fetch Instagram profile',
+          statusCode: 400,
+        });
+      }
+
+      const igUsername = profile.username || `user_${igUserId}`;
+      const isBusiness = profile.account_type === 'BUSINESS' || profile.account_type === 'MEDIA_CREATOR';
+
+      // Step 4: Upsert into instagram_accounts
+      const existing = await db
+        .select({ id: instagramAccounts.id })
+        .from(instagramAccounts)
+        .where(
+          and(
+            eq(instagramAccounts.tenantId, tenantId),
+            eq(instagramAccounts.igUsername, igUsername),
+          ),
+        )
+        .limit(1);
+
+      let accountId: number;
+
+      if (existing.length > 0) {
+        accountId = existing[0].id;
+        await db
+          .update(instagramAccounts)
+          .set({
+            igUserId,
+            accessToken: accessToken,
+            tokenExpiresAt: tokenExpiresAt,
+            tokenScope: tokenData.permissions?.join(',') || 'instagram_business_basic',
+            bioText: profile.biography || null,
+            profilePicUrl: profile.profile_picture_url || null,
+            followerCount: profile.followers_count ?? null,
+            followingCount: profile.follows_count ?? null,
+            postCount: profile.media_count ?? null,
+            isBusiness,
+            accountStatus: 'active',
+            connectedAt: new Date(),
+            lastActiveAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(instagramAccounts.id, accountId));
+      } else {
+        const [inserted] = await db.insert(instagramAccounts).values({
+          tenantId,
+          igUserId,
+          igUsername,
+          accessToken: accessToken,
+          tokenExpiresAt: tokenExpiresAt,
+          tokenScope: tokenData.permissions?.join(',') || 'instagram_business_basic',
+          bioText: profile.biography || null,
+          profilePicUrl: profile.profile_picture_url || null,
+          followerCount: profile.followers_count ?? null,
+          followingCount: profile.follows_count ?? null,
+          postCount: profile.media_count ?? null,
+          isBusiness,
+          accountStatus: 'active',
+          connectedAt: new Date(),
+          lastActiveAt: new Date(),
+        }).returning({ id: instagramAccounts.id });
+        accountId = inserted.id;
+      }
+
+      logger.info({ tenantId, igUsername, igUserId }, 'Instagram account connected via OAuth');
+
+      return {
+        status: 'connected',
+        account: {
+          id: accountId,
+          igUserId,
+          igUsername,
+          fullName: profile.name || igUsername,
+          profilePicUrl: profile.profile_picture_url || null,
+          followerCount: profile.followers_count || 0,
+          followingCount: profile.follows_count || 0,
+          isBusiness,
+          category: profile.account_type || null,
+        },
+      };
+    } catch (err) {
+      logger.error({ err, tenantId }, 'Instagram OAuth callback failed');
+      const message = err instanceof Error ? err.message : 'OAuth callback failed';
       return reply.status(500).send({
         error: 'Internal Server Error',
         message,
