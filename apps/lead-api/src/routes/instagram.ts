@@ -241,6 +241,108 @@ export async function instagramRoutes(app: FastifyInstance) {
     }
   });
 
+  // ─── POST /instagram/browser-connect ────────────────────────────────────────
+  // Accepts session data from Playwright browser login
+  app.post<{
+    Body: {
+      ig_user_id: string;
+      ig_username: string;
+      session_cookies: string;
+      full_name?: string;
+      biography?: string;
+      profile_pic_url?: string;
+      follower_count?: number;
+      following_count?: number;
+      media_count?: number;
+      is_business?: boolean;
+      category?: string;
+    };
+  }>('/browser-connect', async (request, reply) => {
+    const { tenantId } = request.ctx;
+    const body = request.body;
+
+    if (!body.ig_username || !body.session_cookies) {
+      return reply.status(400).send({
+        error: 'Bad Request',
+        message: 'Username and session cookies are required',
+        statusCode: 400,
+      });
+    }
+
+    try {
+      const existing = await db
+        .select({ id: instagramAccounts.id })
+        .from(instagramAccounts)
+        .where(
+          and(
+            eq(instagramAccounts.tenantId, tenantId),
+            eq(instagramAccounts.igUsername, body.ig_username),
+          ),
+        )
+        .limit(1);
+
+      let accountId: number;
+
+      const accountData = {
+        igUserId: body.ig_user_id || null,
+        sessionJson: body.session_cookies,
+        bioText: body.biography || null,
+        profilePicUrl: body.profile_pic_url || null,
+        followerCount: body.follower_count ?? null,
+        followingCount: body.following_count ?? null,
+        postCount: body.media_count ?? null,
+        isBusiness: body.is_business ?? false,
+        businessCategory: body.category || null,
+        accountStatus: 'active' as const,
+        connectedAt: new Date(),
+        lastActiveAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      if (existing.length > 0) {
+        accountId = existing[0].id;
+        await db
+          .update(instagramAccounts)
+          .set(accountData)
+          .where(eq(instagramAccounts.id, accountId));
+      } else {
+        const [inserted] = await db
+          .insert(instagramAccounts)
+          .values({
+            tenantId,
+            igUsername: body.ig_username,
+            ...accountData,
+          })
+          .returning({ id: instagramAccounts.id });
+        accountId = inserted.id;
+      }
+
+      logger.info({ tenantId, igUsername: body.ig_username }, 'Instagram account connected via browser login');
+
+      return {
+        status: 'connected',
+        account: {
+          id: accountId,
+          igUserId: body.ig_user_id,
+          igUsername: body.ig_username,
+          fullName: body.full_name || body.ig_username,
+          profilePicUrl: body.profile_pic_url || null,
+          followerCount: body.follower_count || 0,
+          followingCount: body.following_count || 0,
+          isBusiness: body.is_business || false,
+          category: body.category || null,
+        },
+      };
+    } catch (err) {
+      logger.error({ err, tenantId }, 'Browser connect failed');
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to save account',
+        statusCode: 500,
+      });
+    }
+  });
+
   // ─── POST /instagram/oauth/callback ─────────────────────────────────────────
   app.post<{
     Body: { code: string; redirect_uri: string };

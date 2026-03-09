@@ -55,8 +55,9 @@ export default function InstagramConnectPage() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectStatus, setConnectStatus] = useState<string>('');
 
-  // Step 1: OAuth — account comes back from popup
+  // Step 1: Browser login
   const [connectedAccount, setConnectedAccount] = useState<ConnectedAccount | null>(null);
 
   // Step 2: Niche setup
@@ -65,88 +66,135 @@ export default function InstagramConnectPage() {
   // Step 3: Engagement settings
   const [engagement, setEngagement] = useState<EngagementSettings>(defaultEngagement);
 
-  // Listen for OAuth callback message from popup
-  const handleOAuthMessage = useCallback((event: MessageEvent) => {
-    // Only accept messages from our own origin
-    if (event.origin !== window.location.origin) return;
-    if (event.data?.type !== 'instagram-oauth-callback') return;
-
-    const { account, error: oauthError } = event.data;
-
-    if (oauthError) {
-      setError(oauthError);
-      setLoading(false);
-      return;
-    }
-
-    if (account) {
-      setConnectedAccount(account);
-      setLoading(false);
-
-      // Auto-setup niche detection
-      setNicheSetup({
-        accountId: account.id,
-        username: account.igUsername,
-        detectedNiche: account.category || 'General',
-        confirmedNiche: account.category || 'General',
-        editingNiche: false,
-        products: [''],
-        idealCustomers: [''],
-        detectingNiche: true,
-      });
-
-      // Move to niche setup
-      setStep(2);
-
-      // Trigger AI niche detection
-      detectNiche(account.id);
-    }
-  }, []);
+  // Poll for connection status after browser opens
+  const [polling, setPolling] = useState(false);
 
   useEffect(() => {
-    window.addEventListener('message', handleOAuthMessage);
-    return () => window.removeEventListener('message', handleOAuthMessage);
-  }, [handleOAuthMessage]);
+    if (!polling) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/proxy/instagram');
+        if (res.ok) {
+          const data = await res.json();
+          const accounts = data.accounts || [];
+          // Check for any newly connected account (active status)
+          const newest = accounts.find(
+            (a: any) => a.account_status === 'active' && !connectedAccount
+          );
+          if (newest) {
+            const account: ConnectedAccount = {
+              id: newest.id,
+              igUserId: newest.ig_user_id || '',
+              igUsername: newest.ig_username,
+              fullName: newest.bio_text?.split('\n')[0] || newest.ig_username,
+              profilePicUrl: newest.profile_pic_url,
+              followerCount: newest.follower_count || 0,
+              followingCount: newest.following_count || 0,
+              isBusiness: newest.is_business || false,
+              category: newest.business_category || null,
+            };
+            setConnectedAccount(account);
+            setPolling(false);
+            setLoading(false);
+            setConnectStatus('');
+            moveToNicheSetup(account);
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [polling, connectedAccount]);
 
-  function handleConnectInstagram() {
+  function moveToNicheSetup(account: ConnectedAccount) {
+    setNicheSetup({
+      accountId: account.id,
+      username: account.igUsername,
+      detectedNiche: account.category || 'General',
+      confirmedNiche: account.category || 'General',
+      editingNiche: false,
+      products: [''],
+      idealCustomers: [''],
+      detectingNiche: true,
+    });
+    setStep(2);
+    detectNiche(account.id);
+  }
+
+  function handleOpenBrowser() {
     setLoading(true);
     setError(null);
+    setConnectStatus('Opening Instagram in your browser...');
 
-    // Build the Instagram OAuth URL
-    const clientId = process.env.NEXT_PUBLIC_INSTAGRAM_APP_ID;
-    const redirectUri = `${window.location.origin}/instagram/callback`;
-    const scope = 'instagram_business_basic,instagram_business_manage_messages';
-
-    const authUrl = `https://www.instagram.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}`;
-
-    // Open in popup
-    const width = 600;
-    const height = 700;
+    // Open Instagram login in a new window
+    const width = 450;
+    const height = 750;
     const left = window.screenX + (window.innerWidth - width) / 2;
     const top = window.screenY + (window.innerHeight - height) / 2;
 
     const popup = window.open(
-      authUrl,
-      'instagram-oauth',
-      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
+      'https://www.instagram.com/accounts/login/',
+      'instagram-login',
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,toolbar=no,menubar=no`
     );
 
     if (!popup) {
-      setError('Popup blocked. Please allow popups for this site and try again.');
+      setError('Popup blocked. Please allow popups for this site.');
       setLoading(false);
+      setConnectStatus('');
       return;
     }
 
-    // Check if popup was closed without completing
+    setConnectStatus(
+      'Log in to Instagram in the popup window. Once logged in, enter your Instagram username below.'
+    );
+
+    // Check if popup closed
     const checkClosed = setInterval(() => {
       if (popup.closed) {
         clearInterval(checkClosed);
-        // If we haven't received account data yet, user closed manually
         if (!connectedAccount) {
-          setLoading(false);
+          setConnectStatus('Instagram window closed. Enter your username below to finish connecting.');
         }
       }
-    }, 500);
+    }, 1000);
+  }
+
+  // Manual connection: user enters their username after logging in via popup
+  const [manualUsername, setManualUsername] = useState('');
+
+  async function handleManualConnect() {
+    if (!manualUsername.trim()) return;
+    setLoading(true);
+    setError(null);
+    setConnectStatus('Looking up your account...');
+
+    try {
+      // Register the account via browser-connect endpoint
+      const res = await fetch('/api/proxy/instagram/browser-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ig_user_id: '',
+          ig_username: manualUsername.trim().replace('@', ''),
+          session_cookies: '{}',
+          is_business: false,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Connection failed');
+
+      const account = data.account as ConnectedAccount;
+      setConnectedAccount(account);
+      moveToNicheSetup(account);
+    } catch (err: any) {
+      setError(err.message);
+      setConnectStatus('');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function detectNiche(accountId: number) {
@@ -163,8 +211,14 @@ export default function InstagramConnectPage() {
                 ...prev,
                 detectedNiche: data.detected_niche || prev.detectedNiche,
                 confirmedNiche: data.detected_niche || prev.confirmedNiche,
-                products: data.suggested_products?.map((p: { name: string }) => p.name) || prev.products,
-                idealCustomers: data.suggested_audiences?.map((a: { name: string }) => a.name) || prev.idealCustomers,
+                products:
+                  data.suggested_products?.length > 0
+                    ? data.suggested_products.map((p: { name: string }) => p.name)
+                    : prev.products,
+                idealCustomers:
+                  data.suggested_audiences?.length > 0
+                    ? data.suggested_audiences.map((a: { name: string }) => a.name)
+                    : prev.idealCustomers,
                 detectingNiche: false,
               }
             : prev
@@ -307,51 +361,88 @@ export default function InstagramConnectPage() {
             {/* Instagram icon */}
             <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 flex items-center justify-center">
               <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z" />
               </svg>
             </div>
 
             <div>
-              <h2 className="text-base font-medium text-text-primary">Connect with Instagram</h2>
+              <h2 className="text-base font-medium text-text-primary">Connect Your Instagram</h2>
               <p className="text-sm text-text-muted mt-1">
-                Sign in with your Instagram account. You'll be redirected to Instagram to authorize access.
+                We'll open Instagram in a new window. Log in with your account (saved passwords work), then come back here.
               </p>
             </div>
           </div>
 
-          <div className="space-y-3">
-            <button
-              onClick={handleConnectInstagram}
-              disabled={loading}
-              className="w-full px-4 py-3 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 hover:from-purple-600 hover:via-pink-600 hover:to-orange-500 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Waiting for Instagram...
-                </>
-              ) : (
-                <>
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z" />
-                  </svg>
-                  Connect with Instagram
-                </>
-              )}
-            </button>
+          {/* Open Browser Button */}
+          <button
+            onClick={handleOpenBrowser}
+            disabled={loading && !connectStatus}
+            className="w-full px-4 py-3 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-400 hover:from-purple-600 hover:via-pink-600 hover:to-orange-500 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z" />
+            </svg>
+            Open Instagram Login
+          </button>
 
-            <div className="flex items-start gap-2 p-3 bg-surface-overlay rounded-lg">
-              <svg className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-              <p className="text-xs text-text-muted">
-                We never see your password. Instagram handles authentication securely
-                and grants us limited access to manage your account.
-              </p>
+          {/* Status message */}
+          {connectStatus && (
+            <div className="p-3 bg-accent/5 border border-accent/20 rounded-lg">
+              <p className="text-xs text-text-secondary">{connectStatus}</p>
             </div>
+          )}
+
+          {/* Username input - shown after browser opens */}
+          {connectStatus && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-xs text-text-muted">Once logged in</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+
+              <div>
+                <label className="block text-xs text-text-secondary mb-1.5">
+                  Enter your Instagram username
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">@</span>
+                    <input
+                      type="text"
+                      value={manualUsername}
+                      onChange={(e) => setManualUsername(e.target.value.replace(/[^a-zA-Z0-9_.]/g, ''))}
+                      placeholder="yourusername"
+                      className="w-full pl-7 pr-3 py-2.5 bg-surface-overlay border border-border rounded-md text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+                      onKeyDown={(e) => e.key === 'Enter' && handleManualConnect()}
+                    />
+                  </div>
+                  <button
+                    onClick={handleManualConnect}
+                    disabled={loading || !manualUsername.trim()}
+                    className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-md transition-colors disabled:opacity-50"
+                  >
+                    {loading ? (
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    ) : (
+                      'Connect'
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-start gap-2 p-3 bg-surface-overlay rounded-lg">
+            <svg className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <p className="text-xs text-text-muted">
+              We never see your password. You log in directly on Instagram.com in your own browser where your passwords are saved.
+            </p>
           </div>
         </div>
       )}
