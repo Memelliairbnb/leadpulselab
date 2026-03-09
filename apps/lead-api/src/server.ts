@@ -14,6 +14,7 @@ import { inventoryRoutes } from './routes/inventory';
 import { discoveryRoutes } from './routes/discovery';
 import { campaignsRoutes } from './routes/campaigns';
 import { adminRoutes } from './routes/admin';
+import { authRoutes } from './routes/auth';
 
 export function buildServer() {
   const app = Fastify({
@@ -36,6 +37,9 @@ export function buildServer() {
 
   // Health check (no auth required)
   app.get('/health', async () => ({ status: 'ok', service: 'lead-api' }));
+
+  // Auth routes (no bearer auth required — uses internal token in header)
+  app.register(authRoutes, { prefix: '/auth' });
 
   // Auth middleware for all /api routes
   app.register(async function authenticatedRoutes(instance) {
