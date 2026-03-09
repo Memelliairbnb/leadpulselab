@@ -3,12 +3,22 @@ export { default } from 'next-auth/middleware';
 export const config = {
   matcher: [
     /*
-     * Match all paths except:
-     * - /login (auth page)
-     * - /api/auth (NextAuth endpoints)
-     * - /_next (Next.js internals)
-     * - /favicon.ico, /images, etc.
+     * Protect dashboard routes only — match paths that start with known dashboard segments.
+     * Public pages: / (landing), /login, /api/auth
      */
-    '/((?!login|api/auth|_next/static|_next/image|favicon\\.ico|images|manifest\\.json).*)',
+    '/overview/:path*',
+    '/leads/:path*',
+    '/discovery/:path*',
+    '/campaigns/:path*',
+    '/inbox/:path*',
+    '/pipelines/:path*',
+    '/keywords/:path*',
+    '/sources/:path*',
+    '/inventory/:path*',
+    '/analytics/:path*',
+    '/settings/:path*',
+    '/outreach/:path*',
+    '/scans/:path*',
+    '/jobs/:path*',
   ],
 };
