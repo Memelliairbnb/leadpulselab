@@ -84,20 +84,18 @@ interface RawProfile {
   tenant_id: number;
   instagram_handle: string;
   display_name: string | null;
-  bio: string | null;
+  bio_text: string | null;
   profile_url: string | null;
   follower_count: number | null;
   following_count: number | null;
   post_count: number | null;
   is_private: boolean | null;
-  is_verified: boolean | null;
   is_business: boolean | null;
   category: string | null;
-  public_email: string | null;
-  public_phone: string | null;
+  public_email_candidate: string | null;
+  public_phone_candidate: string | null;
   website_url: string | null;
-  city: string | null;
-  state: string | null;
+  location_clues: string | null;
   discovery_run_id: number | null;
   processing_status: string | null;
 }
@@ -129,7 +127,7 @@ function normalizePhone(phone: string | null): string | null {
 // ─── Classification ─────────────────────────────────────────────────────────
 
 function classifyProfileType(profile: RawProfile): ProfileType {
-  const bio = profile.bio?.toLowerCase() ?? "";
+  const bio = profile.bio_text?.toLowerCase() ?? "";
   const name = profile.display_name?.toLowerCase() ?? "";
   const category = profile.category?.toLowerCase() ?? "";
   const combined = `${bio} ${name} ${category}`;
@@ -139,7 +137,8 @@ function classifyProfileType(profile: RawProfile): ProfileType {
 
   // Check for business indicators
   if (BUSINESS_RE.test(combined)) return "business";
-  if (profile.public_email || profile.public_phone) return "business";
+  if (profile.public_email_candidate || profile.public_phone_candidate) return "business";
+  if (profile.website_url) return "business";
   if (profile.category && profile.category.length > 0) return "business";
 
   // Check for creator indicators
@@ -156,7 +155,7 @@ function classifyProfileType(profile: RawProfile): ProfileType {
 
 function scoreNicheFit(profile: RawProfile, keywords: string[]): number {
   let score = 0;
-  const bio = profile.bio?.toLowerCase() ?? "";
+  const bio = profile.bio_text?.toLowerCase() ?? "";
   const name = profile.display_name?.toLowerCase() ?? "";
   const category = profile.category?.toLowerCase() ?? "";
   const combined = `${bio} ${name} ${category}`;
@@ -187,8 +186,8 @@ function scoreNicheFit(profile: RawProfile, keywords: string[]): number {
 function scoreContactability(profile: RawProfile): number {
   let score = 0;
 
-  if (profile.public_email) score += 40;
-  if (profile.public_phone) score += 30;
+  if (profile.public_email_candidate) score += 40;
+  if (profile.public_phone_candidate) score += 30;
   if (profile.website_url) score += 20;
   if (profile.category && profile.category.length > 0) score += 10;
 
@@ -196,13 +195,13 @@ function scoreContactability(profile: RawProfile): number {
   if (profile.is_private) score -= 50;
 
   // No bio at all is a bad sign
-  if (!profile.bio || profile.bio.trim().length === 0) score -= 20;
+  if (!profile.bio_text || profile.bio_text.trim().length === 0) score -= 20;
 
   return Math.max(0, Math.min(100, score));
 }
 
 function scoreBioQuality(profile: RawProfile): number {
-  const bio = profile.bio ?? "";
+  const bio = profile.bio_text ?? "";
   let score = 0;
 
   // Bio length
@@ -281,8 +280,8 @@ export async function processInstagramScrub(job: Job<InstagramScrubJobData>) {
   // ─── Step 2: Normalize Handle ───────────────────────────────────────────
   const handle = normalizeHandle(profile.instagram_handle);
   const profileUrl = normalizeProfileUrl(handle);
-  const normalizedEmail = normalizeEmail(profile.public_email);
-  const normalizedPhone = normalizePhone(profile.public_phone);
+  const normalizedEmail = normalizeEmail(profile.public_email_candidate);
+  const normalizedPhone = normalizePhone(profile.public_phone_candidate);
 
   // ─── Step 3: Duplicate Scrub ────────────────────────────────────────────
   const dupeResult = await db.execute(
@@ -348,57 +347,43 @@ export async function processInstagramScrub(job: Job<InstagramScrubJobData>) {
     sql`INSERT INTO instagram_profile_candidates (
           tenant_id,
           raw_profile_id,
-          discovery_run_id,
           instagram_handle,
-          display_name,
-          bio,
           profile_url,
-          follower_count,
-          following_count,
-          post_count,
-          is_private,
-          is_verified,
-          is_business,
+          display_name,
+          bio_text,
           category,
-          public_email,
-          public_phone,
           website_url,
-          city,
-          state,
+          normalized_email,
+          normalized_phone,
           profile_type,
+          duplicate_status,
           niche_fit_score,
           contactability_score,
           bio_quality_score,
-          prequal_score,
+          overall_prequal_score,
           prequal_status,
+          scrub_notes,
           created_at,
           updated_at
         ) VALUES (
           ${tenantId},
           ${rawProfileId},
-          ${discoveryRunId},
           ${handle},
-          ${profile.display_name},
-          ${profile.bio},
           ${profileUrl},
-          ${profile.follower_count},
-          ${profile.following_count},
-          ${profile.post_count},
-          ${!!profile.is_private},
-          ${!!profile.is_verified},
-          ${!!profile.is_business},
+          ${profile.display_name},
+          ${profile.bio_text},
           ${profile.category},
+          ${profile.website_url},
           ${normalizedEmail},
           ${normalizedPhone},
-          ${profile.website_url},
-          ${profile.city},
-          ${profile.state},
           ${profileType},
+          ${'unique'},
           ${nicheFit},
           ${contactability},
           ${bioQuality},
           ${prequalScore},
           ${prequalStatus},
+          ${`type=${profileType}, private=${!!profile.is_private}`},
           NOW(),
           NOW()
         )
