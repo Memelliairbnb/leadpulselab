@@ -510,6 +510,18 @@ export async function processLeadEnrichment(job: Job<LeadEnrichmentJobData>) {
   const resolvedCompany = acc.companyFromWebsite ?? acc.companies[0] ?? null;
   const resolvedName = acc.displayName ?? lead.fullName;
 
+  // Apply score caps based on contact data (CRITICAL PIPELINE RULE)
+  // No contact data → cap at 60, profile only → cap at 75, direct contact → full score
+  let cappedScore = lead.leadScore ?? 0;
+  if (!primaryEmail && !primaryPhone) {
+    // No contact data — cap at 60 (nurture max)
+    cappedScore = Math.min(cappedScore, 60);
+  } else if (!primaryEmail && primaryPhone) {
+    // Phone but no email — allow up to 75
+    cappedScore = Math.min(cappedScore, 75);
+  }
+  // If email found, full score allowed
+
   const step7 = await runStep("update_qualified_lead", async () => {
     await db
       .update(qualifiedLeads)
@@ -528,6 +540,7 @@ export async function processLeadEnrichment(job: Job<LeadEnrichmentJobData>) {
         companyName: resolvedCompany ?? lead.companyName,
         emailVerified: !!primaryEmail,
         phoneVerified: !!primaryPhone,
+        leadScore: cappedScore,
         updatedAt: new Date(),
       })
       .where(eq(qualifiedLeads.id, qualifiedLeadId));
