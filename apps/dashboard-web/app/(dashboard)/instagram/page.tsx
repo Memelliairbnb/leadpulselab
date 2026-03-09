@@ -2,31 +2,33 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { formatRelativeTime } from '@/lib/utils';
 
 interface InstagramAccount {
-  id: string;
-  username: string;
-  fullName: string;
-  profilePicUrl: string | null;
-  followerCount: number;
-  followingCount: number;
-  postCount: number;
-  isBusiness: boolean;
-  category: string | null;
-  niche: string | null;
-  status: 'active' | 'paused' | 'error' | 'connecting';
-  todayFollows: number;
-  todayLikes: number;
-  todayComments: number;
-  todayDms: number;
-  totalLeadsScraped: number;
-  engagementRate: number;
-  lastActiveAt: string | null;
-  createdAt: string;
+  id: number;
+  ig_username: string;
+  ig_user_id: string | null;
+  bio_text: string | null;
+  profile_pic_url: string | null;
+  follower_count: number | null;
+  following_count: number | null;
+  post_count: number | null;
+  is_business: boolean;
+  business_category: string | null;
+  detected_niche: string | null;
+  confirmed_niche: string | null;
+  account_status: string;
+  connected_at: string | null;
+  last_active_at: string | null;
+  config: any;
+  products: Array<{ id: number; name: string }>;
+  audiences: Array<{ id: number; name: string }>;
+  today_stats: {
+    follows: number;
+    likes: number;
+    comments: number;
+    dms: number;
+  };
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export default function InstagramPage() {
   const [accounts, setAccounts] = useState<InstagramAccount[]>([]);
@@ -40,10 +42,10 @@ export default function InstagramPage() {
   async function fetchAccounts() {
     setLoading(true);
     try {
-      const res = await fetch('/api/proxy/instagram/accounts');
+      const res = await fetch('/api/proxy/instagram');
       if (!res.ok) throw new Error('Failed to load accounts');
       const data = await res.json();
-      setAccounts(data.data ?? data.accounts ?? data ?? []);
+      setAccounts(data.accounts ?? []);
     } catch (err: any) {
       setError(err.message);
       setAccounts([]);
@@ -56,14 +58,8 @@ export default function InstagramPage() {
     active: 'bg-success',
     paused: 'bg-warning',
     error: 'bg-danger',
-    connecting: 'bg-accent',
-  };
-
-  const statusLabels: Record<string, string> = {
-    active: 'Active',
-    paused: 'Paused',
-    error: 'Error',
-    connecting: 'Connecting...',
+    pending: 'bg-accent',
+    disabled: 'bg-archive',
   };
 
   if (loading) {
@@ -96,33 +92,31 @@ export default function InstagramPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-surface-raised border border-border rounded-lg px-5 py-4">
             <p className="text-xs text-text-muted uppercase tracking-wider">Connected Accounts</p>
-            <p className="text-2xl font-semibold mt-1 tabular-nums text-text-primary">
-              {accounts.length}
-            </p>
+            <p className="text-2xl font-semibold mt-1 tabular-nums text-text-primary">{accounts.length}</p>
             <p className="text-xs mt-1 text-text-muted">
-              {accounts.filter((a) => a.status === 'active').length} active
+              {accounts.filter((a) => a.account_status === 'active').length} active
             </p>
           </div>
           <div className="bg-surface-raised border border-border rounded-lg px-5 py-4">
             <p className="text-xs text-text-muted uppercase tracking-wider">Today&apos;s Follows</p>
             <p className="text-2xl font-semibold mt-1 tabular-nums text-accent">
-              {accounts.reduce((sum, a) => sum + a.todayFollows, 0)}
+              {accounts.reduce((sum, a) => sum + (a.today_stats?.follows || 0), 0)}
             </p>
             <p className="text-xs mt-1 text-text-muted">Across all accounts</p>
           </div>
           <div className="bg-surface-raised border border-border rounded-lg px-5 py-4">
             <p className="text-xs text-text-muted uppercase tracking-wider">Today&apos;s Engagement</p>
             <p className="text-2xl font-semibold mt-1 tabular-nums text-success">
-              {accounts.reduce((sum, a) => sum + a.todayLikes + a.todayComments, 0)}
+              {accounts.reduce((sum, a) => sum + (a.today_stats?.likes || 0) + (a.today_stats?.comments || 0), 0)}
             </p>
             <p className="text-xs mt-1 text-text-muted">Likes + Comments</p>
           </div>
           <div className="bg-surface-raised border border-border rounded-lg px-5 py-4">
-            <p className="text-xs text-text-muted uppercase tracking-wider">Total Leads Scraped</p>
-            <p className="text-2xl font-semibold mt-1 tabular-nums text-strong">
-              {accounts.reduce((sum, a) => sum + a.totalLeadsScraped, 0).toLocaleString()}
+            <p className="text-xs text-text-muted uppercase tracking-wider">Products</p>
+            <p className="text-2xl font-semibold mt-1 tabular-nums text-text-primary">
+              {accounts.reduce((sum, a) => sum + (a.products?.length || 0), 0)}
             </p>
-            <p className="text-xs mt-1 text-text-muted">From all accounts</p>
+            <p className="text-xs mt-1 text-text-muted">Configured across accounts</p>
           </div>
         </div>
       )}
@@ -156,17 +150,12 @@ export default function InstagramPage() {
               className="bg-surface-raised border border-border rounded-lg p-5 hover:border-accent/40 transition-colors group"
             >
               <div className="flex items-start gap-4">
-                {/* Avatar */}
                 <div className="w-14 h-14 rounded-full bg-surface-overlay flex items-center justify-center flex-shrink-0 overflow-hidden">
-                  {account.profilePicUrl ? (
-                    <img
-                      src={account.profilePicUrl}
-                      alt={account.username}
-                      className="w-full h-full object-cover"
-                    />
+                  {account.profile_pic_url ? (
+                    <img src={account.profile_pic_url} alt={account.ig_username} className="w-full h-full object-cover" />
                   ) : (
                     <span className="text-lg font-semibold text-text-muted">
-                      {account.username.charAt(0).toUpperCase()}
+                      {account.ig_username.charAt(0).toUpperCase()}
                     </span>
                   )}
                 </div>
@@ -174,69 +163,68 @@ export default function InstagramPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-text-primary group-hover:text-accent transition-colors truncate">
-                      @{account.username}
+                      @{account.ig_username}
                     </h3>
                     <span className="flex items-center gap-1.5">
-                      <span className={`w-2 h-2 rounded-full ${statusColors[account.status] ?? 'bg-archive'}`} />
-                      <span className="text-xs text-text-muted">
-                        {statusLabels[account.status] ?? account.status}
-                      </span>
+                      <span className={`w-2 h-2 rounded-full ${statusColors[account.account_status] ?? 'bg-archive'}`} />
+                      <span className="text-xs text-text-muted capitalize">{account.account_status}</span>
                     </span>
                   </div>
-                  {account.fullName && (
-                    <p className="text-xs text-text-secondary mt-0.5 truncate">{account.fullName}</p>
+
+                  {(account.confirmed_niche || account.detected_niche) && (
+                    <span className="inline-block mt-1 text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">
+                      {account.confirmed_niche || account.detected_niche}
+                    </span>
                   )}
 
-                  {/* Follower stats */}
                   <div className="flex items-center gap-4 mt-2">
                     <span className="text-xs text-text-muted">
                       <span className="text-text-primary font-medium tabular-nums">
-                        {account.followerCount.toLocaleString()}
-                      </span>{' '}
-                      followers
+                        {(account.follower_count || 0).toLocaleString()}
+                      </span>{' '}followers
                     </span>
                     <span className="text-xs text-text-muted">
                       <span className="text-text-primary font-medium tabular-nums">
-                        {account.followingCount.toLocaleString()}
-                      </span>{' '}
-                      following
+                        {(account.following_count || 0).toLocaleString()}
+                      </span>{' '}following
                     </span>
-                    {account.niche && (
-                      <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">
-                        {account.niche}
-                      </span>
-                    )}
                   </div>
+
+                  {/* Products */}
+                  {account.products?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {account.products.slice(0, 3).map((p) => (
+                        <span key={p.id} className="text-xs bg-surface-overlay text-text-secondary px-2 py-0.5 rounded">
+                          {p.name}
+                        </span>
+                      ))}
+                      {account.products.length > 3 && (
+                        <span className="text-xs text-text-muted">+{account.products.length - 3} more</span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Today's activity */}
                   <div className="grid grid-cols-4 gap-3 mt-3 pt-3 border-t border-border-subtle">
                     <div>
                       <p className="text-xs text-text-muted">Follows</p>
-                      <p className="text-sm font-medium text-text-primary tabular-nums">{account.todayFollows}</p>
+                      <p className="text-sm font-medium text-text-primary tabular-nums">{account.today_stats?.follows || 0}</p>
                     </div>
                     <div>
                       <p className="text-xs text-text-muted">Likes</p>
-                      <p className="text-sm font-medium text-text-primary tabular-nums">{account.todayLikes}</p>
+                      <p className="text-sm font-medium text-text-primary tabular-nums">{account.today_stats?.likes || 0}</p>
                     </div>
                     <div>
                       <p className="text-xs text-text-muted">Comments</p>
-                      <p className="text-sm font-medium text-text-primary tabular-nums">{account.todayComments}</p>
+                      <p className="text-sm font-medium text-text-primary tabular-nums">{account.today_stats?.comments || 0}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-text-muted">Leads</p>
-                      <p className="text-sm font-medium text-strong tabular-nums">
-                        {account.totalLeadsScraped.toLocaleString()}
-                      </p>
+                      <p className="text-xs text-text-muted">DMs</p>
+                      <p className="text-sm font-medium text-text-primary tabular-nums">{account.today_stats?.dms || 0}</p>
                     </div>
                   </div>
                 </div>
               </div>
-
-              {account.lastActiveAt && (
-                <p className="text-xs text-text-muted mt-3 text-right">
-                  Last active {formatRelativeTime(account.lastActiveAt)}
-                </p>
-              )}
             </Link>
           ))}
         </div>
