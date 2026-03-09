@@ -80,3 +80,36 @@ export interface SourceAdapter {
   fetch(params: FetchParams): Promise<RawSourcePayload[]>;
   extractLeads(payload: RawSourcePayload): RawLeadCandidate[];
 }
+
+// --- Intent signal types ---
+
+export type IntentType =
+  | 'seeking_help'
+  | 'requesting_service'
+  | 'expressing_pain'
+  | 'switching_provider'
+  | 'asking_recommendation';
+
+export interface IntentSignal {
+  /** The intent phrase that matched, e.g. "need help with" */
+  signalPhrase: string;
+  /** Classified type of intent */
+  intentType: IntentType;
+  /** 0-1 confidence score */
+  confidence: number;
+  /** The actual text fragment that matched */
+  matchedText: string;
+}
+
+export interface DiscoveryQuery {
+  /** The fully-built search query string */
+  query: string;
+  /** Intent phrases included in this query */
+  intentPhrases: string[];
+  /** Industry keywords included in this query */
+  industryKeywords: string[];
+  /** Optional site: operators applied */
+  targetSites?: string[];
+  /** The keyword category this query was generated from */
+  category: string;
+}

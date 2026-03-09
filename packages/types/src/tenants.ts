@@ -114,6 +114,10 @@ export interface VerticalTemplateConfig {
       type: 'phrase' | 'hashtag' | 'regex';
     }>;
   }>;
+  /** Intent phrases specific to this vertical (combined with defaults in query builder) */
+  intentPhrases?: string[];
+  /** High-signal sites to target with site: operators */
+  targetSites?: string[];
   scoringSignals: Array<{
     signalKey: string;
     signalPattern: string;

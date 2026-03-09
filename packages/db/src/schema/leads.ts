@@ -59,7 +59,7 @@ export const qualifiedLeads = pgTable(
     aiConfidence: numeric('ai_confidence', { precision: 3, scale: 2 }),
     aiSummary: text('ai_summary').notNull(),
     aiSignalsJson: jsonb('ai_signals_json').notNull().default([]),
-    aiRecommendedAction: varchar('ai_recommended_action', { length: 255 }),
+    aiRecommendedAction: text('ai_recommended_action'),
     city: varchar('city', { length: 100 }),
     state: varchar('state', { length: 50 }),
     country: varchar('country', { length: 50 }).default('US'),
@@ -69,6 +69,10 @@ export const qualifiedLeads = pgTable(
     contactType: varchar('contact_type', { length: 30 }),
     status: varchar('status', { length: 20 }).notNull().default('new'),
     assignedToUserId: integer('assigned_to_user_id').references(() => users.id),
+    intentType: varchar('intent_type', { length: 50 }),
+    isRealPerson: boolean('is_real_person').default(true),
+    estimatedUrgency: varchar('estimated_urgency', { length: 20 }),
+    personOrBusinessName: varchar('person_or_business_name', { length: 255 }),
     needsReview: boolean('needs_review').notNull().default(true),
     isDuplicate: boolean('is_duplicate').notNull().default(false),
     duplicateOfLeadId: integer('duplicate_of_lead_id'),
@@ -138,6 +142,33 @@ export const leadContacts = pgTable(
   },
   (table) => [
     index('idx_lead_contacts_lead').on(table.leadId),
+  ],
+);
+
+export const leadSignals = pgTable(
+  'lead_signals',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id').notNull().references(() => tenants.id),
+    rawLeadId: integer('raw_lead_id').notNull().references(() => rawLeads.id),
+    qualifiedLeadId: integer('qualified_lead_id').references(() => qualifiedLeads.id),
+    signalPhrase: varchar('signal_phrase', { length: 100 }),
+    intentType: varchar('intent_type', { length: 50 }),
+    signalStrength: integer('signal_strength'),
+    sourceUrl: text('source_url'),
+    sourcePlatform: varchar('source_platform', { length: 50 }),
+    authorName: varchar('author_name', { length: 255 }),
+    authorProfileUrl: text('author_profile_url'),
+    contentSnippet: text('content_snippet'),
+    contentDate: timestamp('content_date', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_lead_signals_tenant').on(table.tenantId),
+    index('idx_lead_signals_raw_lead').on(table.rawLeadId),
+    index('idx_lead_signals_qualified_lead').on(table.qualifiedLeadId),
+    index('idx_lead_signals_intent_type').on(table.intentType),
+    index('idx_lead_signals_author_name').on(table.authorName),
   ],
 );
 

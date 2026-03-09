@@ -11,6 +11,15 @@ export const LeadAnalysisSchema = z.object({
   summary: z.string(),
   recommended_next_action: z.string(),
   rejection_reason: z.string().nullable().optional(),
+  // Intent signal fields (new — optional for backward compat with older responses)
+  intent_type: z.string().optional().default('unknown'),
+  signal_phrases_found: z.array(z.string()).optional().default([]),
+  is_real_person: z.boolean().optional().default(true),
+  person_or_business_name: z.string().nullable().optional().default(null),
+  estimated_urgency: z
+    .enum(['immediate', 'short_term', 'exploring', 'none'])
+    .optional()
+    .default('exploring'),
 });
 
 export type LeadAnalysisOutput = z.infer<typeof LeadAnalysisSchema>;

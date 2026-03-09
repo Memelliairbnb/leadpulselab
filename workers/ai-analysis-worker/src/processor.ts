@@ -154,6 +154,9 @@ export async function processLeadAnalysis(job: Job<LeadAnalysisJobData>) {
         leadType: analysisResult.lead_type,
         finalScore: scoreResult.finalScore,
         confidence: analysisResult.confidence,
+        intentType: analysisResult.intent_type,
+        isRealPerson: analysisResult.is_real_person,
+        estimatedUrgency: analysisResult.estimated_urgency,
       },
       "AI analysis complete"
     );
@@ -163,20 +166,34 @@ export async function processLeadAnalysis(job: Job<LeadAnalysisJobData>) {
       (lt) => lt.name === analysisResult.lead_type
     );
 
+    // Build enriched AI signals JSON with intent data
+    const aiSignals = {
+      signals: analysisResult.signals,
+      intent_type: analysisResult.intent_type ?? 'unknown',
+      signal_phrases_found: analysisResult.signal_phrases_found ?? [],
+      is_real_person: analysisResult.is_real_person ?? true,
+      person_or_business_name: analysisResult.person_or_business_name ?? null,
+      estimated_urgency: analysisResult.estimated_urgency ?? 'exploring',
+    };
+
+    // Use person/business name from AI if available, fall back to profile name
+    const resolvedName =
+      analysisResult.person_or_business_name ?? rawLead.profileName ?? null;
+
     // Create qualified lead record
     const [qualifiedLead] = await db
       .insert(qualifiedLeads)
       .values({
         tenantId,
         rawLeadId,
-        fullName: rawLead.profileName ?? null,
+        fullName: resolvedName,
         leadType: analysisResult.lead_type,
         leadTypeId: matchedLeadType?.id ?? null,
         intentLevel: scoreResult.intentLevel,
         leadScore: scoreResult.finalScore,
         aiConfidence: String(analysisResult.confidence),
         aiSummary: analysisResult.summary,
-        aiSignalsJson: analysisResult.signals,
+        aiSignalsJson: aiSignals,
         aiRecommendedAction: analysisResult.recommended_next_action,
         platform: rawLead.platform,
         profileUrl: rawLead.profileUrl,
