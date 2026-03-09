@@ -19,6 +19,7 @@ import {
   buildClassificationUserPrompt,
 } from "@alh/ai";
 import { calculateFinalScore } from "@alh/scoring";
+import type { ContactDataLevel } from "@alh/scoring";
 
 const log = logger.child({ module: "ai-analysis-processor" });
 
@@ -117,6 +118,16 @@ export async function processLeadAnalysis(job: Job<LeadAnalysisJobData>) {
     // Call Claude for classification
     const analysisResult = await analyzeRawLead(systemPrompt, userPrompt);
 
+    // Determine contact data availability for score capping
+    const hasDirectContact = !!(rawLead.contactHint &&
+      (rawLead.contactHint.includes('@') || /\d{7,}/.test(rawLead.contactHint.replace(/\D/g, ''))));
+    const hasProfile = !!(rawLead.profileName || rawLead.profileUrl);
+    const contactDataLevel: ContactDataLevel = hasDirectContact
+      ? 'direct'
+      : hasProfile
+        ? 'profile'
+        : 'none';
+
     // Calculate final score using tenant scoring model
     const scoreResult = calculateFinalScore(
       {
@@ -125,6 +136,7 @@ export async function processLeadAnalysis(job: Job<LeadAnalysisJobData>) {
         contentDate: rawLead.contentDate,
         matchedKeywords: (rawLead.matchedKeywords as string[]) ?? [],
         isExistingDuplicate: false,
+        contactDataLevel,
       },
       {
         claudeWeight: scoringModel

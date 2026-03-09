@@ -20,10 +20,10 @@ const statusOptions = [
 
 const intentOptions = [
   { value: '', label: 'All Scores' },
-  { value: 'high', label: 'Hot (80+)' },
-  { value: 'medium', label: 'Strong (60-79)' },
-  { value: 'low', label: 'Nurture (35-59)' },
-  { value: 'archive', label: 'Archive (<35)' },
+  { value: 'high', label: 'Hot (85+)' },
+  { value: 'medium', label: 'Strong (70-84)' },
+  { value: 'low', label: 'Nurture (30-69)' },
+  { value: 'archive', label: 'Archive (<30)' },
 ];
 
 const platformOptions = [

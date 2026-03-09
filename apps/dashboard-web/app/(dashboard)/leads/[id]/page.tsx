@@ -7,6 +7,7 @@ import { api } from '@/lib/api-client';
 import { ScoreBadge } from '@/components/shared/score-badge';
 import { StatusChip } from '@/components/shared/status-chip';
 import { formatDate, formatRelativeTime } from '@/lib/utils';
+import { getLeadDisplayName, parseAiSignals } from '@/lib/lead-utils';
 
 export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -21,16 +22,12 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     async function load() {
       try {
-        const [l, c, a, o] = await Promise.all([
-          api.getLead(leadId),
-          api.getLeadContacts(leadId),
-          api.getLeadActivity(leadId),
-          api.getLeadOutreach(leadId),
-        ]);
-        setLead(l);
-        setContacts(c);
-        setActivity(a);
-        setOutreach(o);
+        // The API returns lead with embedded contacts, activity, rawLead, and outreachDrafts
+        const detail = await api.getLead(leadId);
+        setLead(detail);
+        setContacts((detail as any).contacts ?? []);
+        setActivity((detail as any).activity ?? []);
+        setOutreach((detail as any).outreachDrafts ?? []);
       } catch (err) {
         console.error('Failed to load lead:', err);
       } finally {
@@ -88,7 +85,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             &larr; Back to leads
           </Link>
           <h1 className="text-lg font-semibold text-text-primary">
-            {lead.fullName || lead.companyName || 'Unknown Lead'}
+            {getLeadDisplayName(lead)}
           </h1>
           <div className="flex items-center gap-3 mt-2">
             <StatusChip status={lead.status} />
@@ -122,11 +119,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           </div>
 
           {/* Signals */}
-          {lead.aiSignalsJson.length > 0 && (
+          {parseAiSignals(lead.aiSignalsJson).length > 0 && (
             <div className="bg-surface-raised border border-border rounded-lg p-5">
               <h2 className="text-sm font-medium text-text-primary mb-3">Signals</h2>
               <div className="flex flex-wrap gap-2">
-                {lead.aiSignalsJson.map((signal, i) => (
+                {parseAiSignals(lead.aiSignalsJson).map((signal, i) => (
                   <span
                     key={i}
                     className="text-xs px-2.5 py-1 rounded-full bg-surface-overlay border border-border text-text-secondary"

@@ -1,11 +1,21 @@
 import type { TenantScoringSignal, ScoreResult } from '@alh/types';
 
+/**
+ * Contact data availability levels, used to cap scores for unreachable leads.
+ * - 'direct': email or phone available — no cap
+ * - 'profile': username or profile URL only — capped at 75
+ * - 'none': no contact data at all — capped at 60
+ */
+export type ContactDataLevel = 'direct' | 'profile' | 'none';
+
 interface ScoringInput {
   claudeScore: number;
   rawText: string;
   contentDate: Date | null;
   matchedKeywords: string[];
   isExistingDuplicate: boolean;
+  /** Optional — defaults to 'direct' for backward compatibility */
+  contactDataLevel?: ContactDataLevel;
 }
 
 interface ScoringConfig {
@@ -70,13 +80,29 @@ export function calculateFinalScore(
   const finalScore = Math.round(
     config.claudeWeight * input.claudeScore + config.rulesWeight * rulesScore,
   );
-  const clampedScore = Math.max(0, Math.min(100, finalScore));
+  let clampedScore = Math.max(0, Math.min(100, finalScore));
+
+  // --- Contact data penalty ---
+  // A lead you can't reach is not actionable, regardless of intent signals.
+  // Default to 'direct' so existing callers without this field are unaffected.
+  const contactLevel = input.contactDataLevel ?? 'direct';
+
+  if (contactLevel === 'none') {
+    // No contact data at all — cap at 60 (can't be hot or strong)
+    clampedScore = Math.min(clampedScore, 60);
+    signalsMatched.push('no_contact_data');
+  } else if (contactLevel === 'profile') {
+    // Only profile URL / username — cap at 75 (can be strong but not hot)
+    clampedScore = Math.min(clampedScore, 75);
+    signalsMatched.push('profile_only_contact');
+  }
 
   // Determine intent level from thresholds
   let intentLevel: 'high' | 'medium' | 'low' | 'archive';
   if (clampedScore >= config.hotThreshold) intentLevel = 'high';
-  else if (clampedScore >= config.nurtureThreshold) intentLevel = 'medium';
-  else if (clampedScore >= 40) intentLevel = 'low';
+  else if (clampedScore >= config.strongThreshold) intentLevel = 'medium';
+  else if (clampedScore >= config.nurtureThreshold) intentLevel = 'low';
+  else if (clampedScore >= 30) intentLevel = 'low';
   else intentLevel = 'archive';
 
   return {

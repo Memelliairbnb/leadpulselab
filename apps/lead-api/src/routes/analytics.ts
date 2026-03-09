@@ -49,7 +49,7 @@ export async function analyticsRoutes(app: FastifyInstance) {
               CASE
                 WHEN ${qualifiedLeads.leadScore} >= 85 THEN 'hot'
                 WHEN ${qualifiedLeads.leadScore} >= 70 THEN 'strong'
-                WHEN ${qualifiedLeads.leadScore} >= 50 THEN 'nurture'
+                WHEN ${qualifiedLeads.leadScore} >= 30 THEN 'nurture'
                 ELSE 'archive'
               END
             `,

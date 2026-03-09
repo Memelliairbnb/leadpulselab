@@ -32,6 +32,7 @@ export function buildServer() {
       'X-User-Id',
       'X-User-Role',
       'X-Tenant-Id',
+      'X-Webhook-Key',
     ],
   });
 

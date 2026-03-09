@@ -70,22 +70,28 @@ class ApiClient {
     return this.request(`leads/${id}`);
   }
 
-  async getLeadContacts(id: number): Promise<LeadContact[]> {
-    return this.request(`leads/${id}/contacts`);
-  }
-
-  async getLeadActivity(id: number): Promise<LeadActivity[]> {
-    return this.request(`leads/${id}/activity`);
-  }
-
-  async getLeadOutreach(id: number): Promise<OutreachDraft[]> {
-    return this.request(`leads/${id}/outreach`);
-  }
+  // Note: contacts, activity, and outreach drafts are returned embedded
+  // in the getLead() response from findByIdWithDetails().
 
   async updateLeadStatus(id: number, status: string): Promise<QualifiedLead> {
     return this.request(`leads/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    });
+  }
+
+  async createManualLead(data: {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+    platform?: string;
+    sourceUrl?: string;
+    rawText?: string;
+    notes?: string;
+  }): Promise<{ message: string; rawLeadId: number }> {
+    return this.request('leads/manual', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 

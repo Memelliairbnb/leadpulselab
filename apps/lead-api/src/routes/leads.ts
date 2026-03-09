@@ -1,11 +1,167 @@
 import type { FastifyInstance } from 'fastify';
 import { leadRepo } from '@alh/db/src/repositories/lead-repo';
 import { outreachRepo } from '@alh/db/src/repositories/outreach-repo';
-import { enqueueOutreachGeneration } from '@alh/queues';
+import { enqueueOutreachGeneration, enqueueLeadAnalysis } from '@alh/queues';
 import { logger } from '@alh/observability';
+import { db } from '@alh/db/src/client';
+import { rawLeads } from '@alh/db/src/schema';
 import type { LeadFilters } from '@alh/types';
+import { createHash } from 'crypto';
+
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
 export async function leadsRoutes(app: FastifyInstance) {
+  // POST /leads/manual — create a lead from manual entry
+  app.post<{
+    Body: {
+      fullName?: string;
+      email?: string;
+      phone?: string;
+      platform?: string;
+      sourceUrl?: string;
+      rawText?: string;
+      notes?: string;
+    };
+  }>('/manual', async (request, reply) => {
+    const { tenantId, userId } = request.ctx;
+    const { fullName, email, phone, platform, sourceUrl, rawText, notes } = request.body;
+
+    if (!fullName?.trim() && !email?.trim()) {
+      return reply.status(400).send({
+        error: 'Bad Request',
+        message: 'At least a name or email is required',
+        statusCode: 400,
+      });
+    }
+
+    const textContent = rawText?.trim() || `Manual lead: ${fullName || email}`;
+    const textHash = createHash('sha256').update(textContent + Date.now()).digest('hex').slice(0, 64);
+
+    try {
+      // Create a raw_lead record
+      const [raw] = await db
+        .insert(rawLeads)
+        .values({
+          tenantId,
+          rawSourceId: 0, // sentinel for manual entry
+          platform: platform || 'manual',
+          profileName: fullName || null,
+          profileUrl: null,
+          sourceUrl: sourceUrl?.trim() || 'manual-entry',
+          matchedKeywords: [],
+          rawText: textContent,
+          rawMetadataJson: {
+            source: 'manual_entry',
+            enteredBy: userId,
+            email: email || null,
+            phone: phone || null,
+            notes: notes || null,
+          },
+          textHash,
+          isProcessed: false,
+          processingStatus: 'pending',
+        })
+        .returning();
+
+      // Queue for AI analysis
+      await enqueueLeadAnalysis({ tenantId, rawLeadId: raw.id });
+
+      logger.info({ tenantId, rawLeadId: raw.id, userId }, 'Manual lead created and queued for analysis');
+
+      return reply.status(201).send({
+        message: 'Lead created and queued for AI analysis',
+        rawLeadId: raw.id,
+      });
+    } catch (err) {
+      logger.error({ err, tenantId }, 'Failed to create manual lead');
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to create lead',
+        statusCode: 500,
+      });
+    }
+  });
+
+  // POST /leads/webhook — accepts external lead data via webhook
+  app.post<{
+    Body: {
+      fullName?: string;
+      email?: string;
+      phone?: string;
+      platform?: string;
+      sourceUrl?: string;
+      rawText?: string;
+      notes?: string;
+    };
+  }>('/webhook', async (request, reply) => {
+    // Webhook auth: check X-Webhook-Key header
+    const webhookKey = request.headers['x-webhook-key'];
+
+    if (!WEBHOOK_SECRET || webhookKey !== WEBHOOK_SECRET) {
+      return reply.status(401).send({
+        error: 'Unauthorized',
+        message: 'Invalid or missing X-Webhook-Key header',
+        statusCode: 401,
+      });
+    }
+
+    // For webhooks, tenantId comes from the auth context
+    const { tenantId } = request.ctx;
+    const { fullName, email, phone, platform, sourceUrl, rawText, notes } = request.body;
+
+    if (!fullName?.trim() && !email?.trim() && !rawText?.trim()) {
+      return reply.status(400).send({
+        error: 'Bad Request',
+        message: 'At least a name, email, or rawText is required',
+        statusCode: 400,
+      });
+    }
+
+    const textContent = rawText?.trim() || `Webhook lead: ${fullName || email}`;
+    const textHash = createHash('sha256').update(textContent + Date.now()).digest('hex').slice(0, 64);
+
+    try {
+      const [raw] = await db
+        .insert(rawLeads)
+        .values({
+          tenantId,
+          rawSourceId: 0,
+          platform: platform || 'webhook',
+          profileName: fullName || null,
+          profileUrl: null,
+          sourceUrl: sourceUrl?.trim() || 'webhook-intake',
+          matchedKeywords: [],
+          rawText: textContent,
+          rawMetadataJson: {
+            source: 'webhook',
+            email: email || null,
+            phone: phone || null,
+            notes: notes || null,
+          },
+          textHash,
+          isProcessed: false,
+          processingStatus: 'pending',
+        })
+        .returning();
+
+      await enqueueLeadAnalysis({ tenantId, rawLeadId: raw.id });
+
+      logger.info({ tenantId, rawLeadId: raw.id }, 'Webhook lead created and queued for analysis');
+
+      return reply.status(201).send({
+        message: 'Lead created and queued for AI analysis',
+        rawLeadId: raw.id,
+      });
+    } catch (err) {
+      logger.error({ err, tenantId }, 'Failed to create webhook lead');
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to create lead',
+        statusCode: 500,
+      });
+    }
+  });
+
   // GET /leads - List with filters
   app.get<{
     Querystring: LeadFilters;

@@ -29,9 +29,11 @@ export const leadRepo = {
     const page = filters.page ?? 1;
     const limit = filters.limit ?? 25;
 
-    const sortColumn = filters.sortBy === 'created_at' ? qualifiedLeads.createdAt :
-                       filters.sortBy === 'score' ? qualifiedLeads.leadScore :
-                       filters.sortBy === 'status' ? qualifiedLeads.status :
+    const sortKey = filters.sortBy;
+    const sortColumn = (sortKey === 'created_at' || sortKey === 'createdAt') ? qualifiedLeads.createdAt :
+                       (sortKey === 'score' || sortKey === 'leadScore') ? qualifiedLeads.leadScore :
+                       sortKey === 'status' ? qualifiedLeads.status :
+                       (sortKey === 'fullName' || sortKey === 'full_name') ? qualifiedLeads.fullName :
                        qualifiedLeads.leadScore;
     const order = filters.sortOrder === 'asc' ? sortColumn : desc(sortColumn);
 

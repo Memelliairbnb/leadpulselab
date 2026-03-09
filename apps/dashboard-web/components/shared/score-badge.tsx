@@ -33,9 +33,9 @@ function getScoreBand(score: number, intentLevel?: string): string {
     if (intentLevel === 'low') return 'nurture';
     return 'archive';
   }
-  if (score >= 80) return 'hot';
-  if (score >= 60) return 'strong';
-  if (score >= 35) return 'nurture';
+  if (score >= 85) return 'hot';
+  if (score >= 70) return 'strong';
+  if (score >= 30) return 'nurture';
   return 'archive';
 }
 

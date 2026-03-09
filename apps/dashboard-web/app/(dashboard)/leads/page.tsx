@@ -9,6 +9,7 @@ import { ScoreBadge } from '@/components/shared/score-badge';
 import { StatusChip } from '@/components/shared/status-chip';
 import { LeadFilterBar } from '@/components/leads/lead-filters';
 import { formatRelativeTime } from '@/lib/utils';
+import { getLeadDisplayName } from '@/lib/lead-utils';
 
 export default function LeadsPage() {
   const router = useRouter();
@@ -48,7 +49,7 @@ export default function LeadsPage() {
       render: (lead) => (
         <div>
           <span className="text-text-primary font-medium">
-            {lead.fullName || lead.companyName || 'Unknown'}
+            {getLeadDisplayName(lead)}
           </span>
           {lead.companyName && lead.fullName && (
             <span className="block text-xs text-text-muted">{lead.companyName}</span>
@@ -108,6 +109,23 @@ export default function LeadsPage() {
               ? `${data.pagination.total.toLocaleString()} leads`
               : 'Loading...'}
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push('/leads/import')}
+            className="px-3 py-1.5 text-sm text-text-secondary border border-border rounded-md hover:bg-surface-overlay hover:text-text-primary transition-colors"
+          >
+            Import CSV
+          </button>
+          <button
+            onClick={() => router.push('/leads/new')}
+            className="px-3 py-1.5 text-sm font-medium text-white bg-accent hover:bg-accent-hover rounded-md transition-colors flex items-center gap-1.5"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Lead
+          </button>
         </div>
       </div>
 

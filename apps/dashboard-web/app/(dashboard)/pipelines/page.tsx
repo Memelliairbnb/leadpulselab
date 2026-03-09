@@ -1,16 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
 import { ScoreBadge } from '@/components/shared/score-badge';
 import { TemperatureBadge } from '@/components/shared/temperature-badge';
 import { LifecycleBadge } from '@/components/shared/lifecycle-badge';
+import { getLeadDisplayName } from '@/lib/lead-utils';
+import type { QualifiedLead } from '@alh/types';
 
 interface PipelineLead {
   id: number;
   name: string;
   company: string | null;
   score: number;
+  intentLevel: string;
+  platform: string;
   temperature: 'hot' | 'warm' | 'aged' | 'cold';
   lifecycleStage: string;
   daysInStage: number;
@@ -27,6 +32,7 @@ const stageColors: Record<string, string> = {
 };
 
 export default function PipelinesPage() {
+  const router = useRouter();
   const [leads, setLeads] = useState<PipelineLead[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -39,9 +45,11 @@ export default function PipelinesPage() {
       // Map qualified lead fields to pipeline lead shape
       setLeads(items.map((lead: any) => ({
         id: lead.id,
-        name: lead.fullName || lead.companyName || `Lead #${lead.id}`,
+        name: getLeadDisplayName(lead as QualifiedLead),
         company: lead.companyName || null,
         score: lead.leadScore ?? 0,
+        intentLevel: lead.intentLevel ?? 'low',
+        platform: lead.platform ?? 'unknown',
         temperature: lead.leadScore >= 80 ? 'hot' : lead.leadScore >= 60 ? 'warm' : lead.leadScore >= 35 ? 'aged' : 'cold',
         lifecycleStage: lead.status === 'new' ? 'discovered' : lead.status === 'approved' ? 'qualified' : lead.status === 'outreach_sent' ? 'contacted' : lead.status === 'nurturing' ? 'replied' : lead.status === 'converted' ? 'converted' : 'discovered',
         daysInStage: lead.createdAt ? Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / 86400000) : 0,
@@ -105,6 +113,7 @@ export default function PipelinesPage() {
                 columnLeads.map((lead) => (
                   <div
                     key={lead.id}
+                    onClick={() => router.push(`/leads/${lead.id}`)}
                     className="bg-surface-overlay border border-border-subtle rounded-md p-3 hover:border-border transition-colors cursor-pointer"
                   >
                     <div className="flex items-start justify-between mb-2">
@@ -118,12 +127,22 @@ export default function PipelinesPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <ScoreBadge score={lead.score} />
+                      <ScoreBadge score={lead.score} intentLevel={lead.intentLevel as any} />
                       <TemperatureBadge temperature={lead.temperature} />
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border text-text-muted capitalize">
+                        {lead.platform}
+                      </span>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-xs text-text-muted tabular-nums">
                         {lead.daysInStage}d in stage
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize ${
+                        lead.intentLevel === 'high' ? 'bg-success/10 text-success' :
+                        lead.intentLevel === 'medium' ? 'bg-warning/10 text-warning' :
+                        'bg-surface-overlay text-text-muted'
+                      }`}>
+                        {lead.intentLevel} intent
                       </span>
                     </div>
                   </div>
