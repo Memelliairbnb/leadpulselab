@@ -1,27 +1,38 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import { api } from '@/lib/api-client';
 import type { AnalyticsOverview } from '@alh/types';
 
-async function getOverview(): Promise<AnalyticsOverview | null> {
-  try {
-    return await api.getAnalyticsOverview();
-  } catch {
-    return null;
+const defaultOverview: AnalyticsOverview = {
+  totalLeads: 0,
+  leadsToday: 0,
+  leadsByScoreBand: { hot: 0, strong: 0, nurture: 0, archive: 0 },
+  leadsByType: {},
+  leadsByPlatform: {},
+  scanJobs24h: { completed: 0, failed: 0 },
+  outreachPending: 0,
+};
+
+export default function OverviewPage() {
+  const [overview, setOverview] = useState<AnalyticsOverview>(defaultOverview);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .getAnalyticsOverview()
+      .then((data) => setOverview(data ?? defaultOverview))
+      .catch(() => setOverview(defaultOverview))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-text-muted text-sm">
+        Loading overview...
+      </div>
+    );
   }
-}
-
-export default async function OverviewPage() {
-  const data = await getOverview();
-
-  // Fallback for when API isn't available yet
-  const overview: AnalyticsOverview = data ?? {
-    totalLeads: 0,
-    leadsToday: 0,
-    leadsByScoreBand: { hot: 0, strong: 0, nurture: 0, archive: 0 },
-    leadsByType: {},
-    leadsByPlatform: {},
-    scanJobs24h: { completed: 0, failed: 0 },
-    outreachPending: 0,
-  };
 
   const stats = [
     {
@@ -58,7 +69,6 @@ export default async function OverviewPage() {
         <p className="text-sm text-text-muted mt-1">Lead pipeline at a glance</p>
       </div>
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
           <div
@@ -74,7 +84,6 @@ export default async function OverviewPage() {
         ))}
       </div>
 
-      {/* Score Distribution */}
       <div className="bg-surface-raised border border-border rounded-lg p-5">
         <h2 className="text-sm font-medium text-text-primary mb-4">Score Distribution</h2>
         <div className="flex items-end gap-2 h-32">
@@ -106,7 +115,6 @@ export default async function OverviewPage() {
         </div>
       </div>
 
-      {/* Two-column: By Type + By Platform */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-surface-raised border border-border rounded-lg p-5">
           <h2 className="text-sm font-medium text-text-primary mb-3">Leads by Type</h2>
