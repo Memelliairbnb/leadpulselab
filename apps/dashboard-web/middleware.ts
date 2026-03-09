@@ -20,5 +20,6 @@ export const config = {
     '/outreach/:path*',
     '/scans/:path*',
     '/jobs/:path*',
+    '/instagram/:path*',
   ],
 };
