@@ -14,7 +14,8 @@ async function proxyRequest(req: NextRequest, { params }: { params: Promise<{ pa
 
   const { path } = await params;
   const targetPath = path.join('/');
-  const url = new URL(targetPath, API_URL);
+  // Lead API routes are all under /api/ prefix
+  const url = new URL(`/api/${targetPath}`, API_URL);
 
   // Forward query params
   const searchParams = req.nextUrl.searchParams;
@@ -24,7 +25,7 @@ async function proxyRequest(req: NextRequest, { params }: { params: Promise<{ pa
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'X-Internal-Token': API_TOKEN,
+    Authorization: `Bearer ${API_TOKEN}`,
     'X-User-Id': String(session.user.userId),
     'X-Tenant-Id': String(session.user.tenantId),
     'X-User-Role': session.user.role,

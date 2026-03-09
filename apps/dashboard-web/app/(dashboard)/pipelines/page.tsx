@@ -34,7 +34,18 @@ export default function PipelinesPage() {
     setLoading(true);
     try {
       const res = await api.getPipelineLeads();
-      setLeads(res.items ?? res ?? []);
+      // API returns PaginatedResponse shape with .data array
+      const items = res.data ?? res.items ?? res ?? [];
+      // Map qualified lead fields to pipeline lead shape
+      setLeads(items.map((lead: any) => ({
+        id: lead.id,
+        name: lead.fullName || lead.companyName || `Lead #${lead.id}`,
+        company: lead.companyName || null,
+        score: lead.leadScore ?? 0,
+        temperature: lead.leadScore >= 80 ? 'hot' : lead.leadScore >= 60 ? 'warm' : lead.leadScore >= 35 ? 'aged' : 'cold',
+        lifecycleStage: lead.status === 'new' ? 'discovered' : lead.status === 'approved' ? 'qualified' : lead.status === 'outreach_sent' ? 'contacted' : lead.status === 'nurturing' ? 'replied' : lead.status === 'converted' ? 'converted' : 'discovered',
+        daysInStage: lead.createdAt ? Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / 86400000) : 0,
+      })));
     } catch (err) {
       console.error('Failed to fetch pipeline:', err);
     } finally {

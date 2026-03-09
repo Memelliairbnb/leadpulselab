@@ -60,7 +60,7 @@ export default function DiscoveryPage() {
       if (sourcesRes.status === 'fulfilled') setSources(sourcesRes.value as unknown as SourceAdapter[]);
       if (queryRunsRes.status === 'fulfilled') {
         const data = queryRunsRes.value;
-        setQueryRuns(data.items ?? data.queryRuns ?? data ?? []);
+        setQueryRuns(data.data ?? data.items ?? data.queryRuns ?? data ?? []);
         if (data.scrubRuns) setScrubRuns(data.scrubRuns);
       }
       if (healthRes.status === 'fulfilled') setHealth(healthRes.value as SourceHealth[]);

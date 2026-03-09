@@ -46,7 +46,7 @@ export default function InboxPage() {
       if (filter === 'needs_reply') filters.needsReply = true;
       if (filter === 'ai_draft') filters.hasPendingDraft = true;
       const res = await api.getConversations(filters);
-      setConversations(res.items ?? res ?? []);
+      setConversations(res.data ?? res.items ?? res ?? []);
     } catch (err) {
       console.error('Failed to fetch conversations:', err);
     } finally {
@@ -63,7 +63,7 @@ export default function InboxPage() {
     setReplyText('');
     try {
       const res = await api.getConversationMessages(id);
-      setMessages(res.items ?? res ?? []);
+      setMessages(res.data ?? res.items ?? res ?? []);
     } catch (err) {
       console.error('Failed to fetch messages:', err);
       setMessages([]);

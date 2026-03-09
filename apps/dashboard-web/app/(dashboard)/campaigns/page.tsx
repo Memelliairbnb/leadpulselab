@@ -39,7 +39,7 @@ export default function CampaignsPage() {
       const filters: Record<string, any> = {};
       if (statusFilter !== 'all') filters.status = statusFilter;
       const res = await api.getCampaigns(filters);
-      setCampaigns(res.items ?? res ?? []);
+      setCampaigns(res.data ?? res.items ?? res ?? []);
     } catch (err) {
       console.error('Failed to fetch campaigns:', err);
     } finally {
@@ -56,13 +56,15 @@ export default function CampaignsPage() {
     if (!assignCampaignId || !assignLeadIds.trim()) return;
     setAssigning(true);
     try {
-      const leadIds = assignLeadIds
+      const canonicalLeadIds = assignLeadIds
         .split(',')
         .map((s) => parseInt(s.trim(), 10))
         .filter((n) => !isNaN(n));
+      // The API expects campaignName, not campaignId
+      const selectedCampaign = campaigns.find((c) => String(c.id) === assignCampaignId);
       await api.assignToCampaign({
-        campaignId: parseInt(assignCampaignId, 10),
-        leadIds,
+        campaignName: selectedCampaign?.name ?? assignCampaignId,
+        canonicalLeadIds,
       });
       setAssignLeadIds('');
       await fetchCampaigns();

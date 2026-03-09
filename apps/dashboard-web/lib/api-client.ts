@@ -42,6 +42,18 @@ class ApiClient {
     return res.json();
   }
 
+  /**
+   * Helper: many API endpoints return { data: T[] }.
+   * This unwraps the .data property.
+   */
+  private async requestData<T>(
+    path: string,
+    options: RequestInit = {}
+  ): Promise<T[]> {
+    const res = await this.request<{ data: T[] }>(path, options);
+    return res.data ?? [];
+  }
+
   // ---- Leads ----
 
   async getLeads(filters: LeadFilters = {}): Promise<PaginatedResponse<QualifiedLead>> {
@@ -97,7 +109,7 @@ class ApiClient {
   // ---- Sources ----
 
   async getSources(): Promise<PlatformSource[]> {
-    return this.request('sources');
+    return this.requestData<PlatformSource>('sources');
   }
 
   async toggleSource(id: number, enabled: boolean): Promise<PlatformSource> {
@@ -108,14 +120,15 @@ class ApiClient {
   }
 
   // ---- Keywords ----
+  // API routes: /api/keyword-categories, /api/keywords
 
   async getKeywordCategories(): Promise<KeywordCategory[]> {
-    return this.request('keywords/categories');
+    return this.requestData<KeywordCategory>('keyword-categories');
   }
 
   async getKeywords(categoryId?: number): Promise<Keyword[]> {
     const params = categoryId ? `?categoryId=${categoryId}` : '';
-    return this.request(`keywords${params}`);
+    return this.requestData<Keyword>(`keywords${params}`);
   }
 
   async createKeyword(data: {
@@ -141,13 +154,25 @@ class ApiClient {
   }
 
   // ---- Scans / Jobs ----
+  // API routes: /api/scan-jobs, /api/scan-jobs/run
 
   async getScanJobs(page = 1, limit = 25): Promise<PaginatedResponse<ScanJob>> {
-    return this.request(`scans?page=${page}&limit=${limit}`);
+    // The API returns { data: [...] } without pagination, so we wrap it
+    const res = await this.request<{ data: ScanJob[] }>(`scan-jobs?limit=${limit}`);
+    const data = res.data ?? [];
+    return {
+      data,
+      pagination: {
+        page,
+        limit,
+        total: data.length,
+        totalPages: 1,
+      },
+    };
   }
 
   async triggerScan(sourceId: number): Promise<ScanJob> {
-    return this.request('scans', {
+    return this.request('scan-jobs/run', {
       method: 'POST',
       body: JSON.stringify({ sourceId }),
     });
@@ -200,17 +225,18 @@ class ApiClient {
   }
 
   // ---- Discovery ----
+  // API routes: /api/discovery/query-runs, /api/discovery/trigger-scan
 
   async getDiscoveryQueryRuns(page = 1, limit = 25): Promise<any> {
     return this.request(`discovery/query-runs?page=${page}&limit=${limit}`);
   }
 
   async getSourceHealth(): Promise<any> {
-    return this.request('discovery/source-health');
+    return this.requestData('discovery/source-health');
   }
 
   async triggerDiscoveryScan(sourceId?: number): Promise<any> {
-    return this.request('discovery/scan', {
+    return this.request('discovery/trigger-scan', {
       method: 'POST',
       body: JSON.stringify({ sourceId }),
     });
@@ -219,11 +245,11 @@ class ApiClient {
   // ---- Duplicates ----
 
   async getDuplicateCandidates(page = 1, limit = 25): Promise<any> {
-    return this.request(`duplicates?page=${page}&limit=${limit}`);
+    return this.request(`discovery/duplicates?page=${page}&limit=${limit}`);
   }
 
   async resolveDuplicate(id: number, resolution: string): Promise<any> {
-    return this.request(`duplicates/${id}/resolve`, {
+    return this.request(`discovery/duplicates/${id}/resolve`, {
       method: 'POST',
       body: JSON.stringify({ resolution }),
     });
@@ -246,8 +272,8 @@ class ApiClient {
   }
 
   async assignToCampaign(data: {
-    campaignId: number;
-    leadIds: number[];
+    campaignName: string;
+    canonicalLeadIds: number[];
   }): Promise<any> {
     return this.request('campaigns/assign', {
       method: 'POST',
@@ -255,10 +281,20 @@ class ApiClient {
     });
   }
 
+  // ---- Tenant ----
+
+  async getTenant(): Promise<any> {
+    return this.request('tenant');
+  }
+
+  async getLeadTypes(): Promise<any> {
+    return this.requestData('tenant/lead-types');
+  }
+
   // ---- Pipeline ----
 
   async getPipelineLeads(): Promise<any> {
-    return this.request('pipeline/leads');
+    return this.request('leads?sortBy=leadScore&sortOrder=desc&limit=50');
   }
 
   // ---- Inbox ----
