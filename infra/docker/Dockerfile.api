@@ -1,30 +1,21 @@
-FROM node:20-slim AS base
+FROM node:20-slim AS build
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
-FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
-COPY packages/db/package.json packages/db/
-COPY packages/types/package.json packages/types/
-COPY packages/queues/package.json packages/queues/
-COPY packages/observability/package.json packages/observability/
-COPY packages/utils/package.json packages/utils/
-COPY packages/config/package.json packages/config/
-COPY apps/lead-api/package.json apps/lead-api/
-RUN pnpm install --frozen-lockfile || pnpm install
-
-FROM base AS build
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/*/node_modules ./packages/*/node_modules
-COPY --from=deps /app/apps/lead-api/node_modules ./apps/lead-api/node_modules
-COPY . .
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
+COPY packages/ packages/
+COPY apps/lead-api/ apps/lead-api/
+RUN pnpm install --frozen-lockfile
 RUN pnpm turbo build --filter=@alh/lead-api
 
-FROM base AS runner
-COPY --from=build /app/apps/lead-api/dist ./apps/lead-api/dist
-COPY --from=build /app/packages/*/dist ./packages/*/dist
+FROM node:20-slim AS runner
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./
+COPY --from=build /app/packages/ ./packages/
+COPY --from=build /app/apps/lead-api/ ./apps/lead-api/
 
 ENV NODE_ENV=production
 EXPOSE 3001

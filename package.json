@@ -10,6 +10,7 @@
     "db:push": "turbo db:push --filter=@alh/db"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0"
   },
