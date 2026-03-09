@@ -57,7 +57,7 @@ export default function DiscoveryPage() {
         api.getSourceHealth(),
       ]);
 
-      if (sourcesRes.status === 'fulfilled') setSources(sourcesRes.value as SourceAdapter[]);
+      if (sourcesRes.status === 'fulfilled') setSources(sourcesRes.value as unknown as SourceAdapter[]);
       if (queryRunsRes.status === 'fulfilled') {
         const data = queryRunsRes.value;
         setQueryRuns(data.items ?? data.queryRuns ?? data ?? []);
