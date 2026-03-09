@@ -9,3 +9,6 @@ dist/
 .DS_Store
 coverage/
 .vercel
+.ig-sessions/
+scripts/ig-posts/
+leadpulselab

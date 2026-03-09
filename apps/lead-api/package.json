@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@alh/ai": "workspace:*",
     "@alh/db": "workspace:*",
     "@alh/observability": "workspace:*",
     "@alh/queues": "workspace:*",

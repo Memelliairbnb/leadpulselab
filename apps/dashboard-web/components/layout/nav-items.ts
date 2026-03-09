@@ -13,6 +13,7 @@ export const navItems: NavItem[] = [
   { label: 'Inbox', href: '/inbox', icon: 'inbox' },
   { label: 'Pipelines', href: '/pipelines', icon: 'columns' },
   { label: 'Keywords', href: '/keywords', icon: 'hash' },
+  { label: 'Instagram', href: '/instagram', icon: 'instagram' },
   { label: 'Sources', href: '/sources', icon: 'radio' },
   { label: 'Inventory', href: '/inventory', icon: 'package' },
   { label: 'Analytics', href: '/analytics', icon: 'bar-chart' },

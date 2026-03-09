@@ -91,13 +91,12 @@ async function main() {
       // Insert discovery run record
       const [run] = await sql`
         INSERT INTO instagram_discovery_runs (
-          tenant_id, search_query, search_type, status, metadata
+          tenant_id, search_query, search_type, status
         ) VALUES (
           ${TENANT_ID},
           ${sq.query},
           ${'keyword'},
-          ${'pending'},
-          ${JSON.stringify({ category: sq.category, city: sq.city, vertical: 'credit_repair' })}::jsonb
+          ${'pending'}
         )
         RETURNING id
       `;

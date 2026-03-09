@@ -60,6 +60,9 @@ importers:
 
   apps/lead-api:
     dependencies:
+      '@alh/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@alh/db':
         specifier: workspace:*
         version: link:../../packages/db
