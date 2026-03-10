@@ -9,6 +9,7 @@ import type {
   InstagramDiscoveryJobData,
   InstagramScrubJobData,
   InstagramEnrichmentJobData,
+  VideoProcessingJobData,
 } from './types';
 
 export async function enqueueSourceScan(data: SourceScanJobData) {
@@ -71,5 +72,12 @@ export async function enqueueInstagramEnrichment(data: InstagramEnrichmentJobDat
   const queue = getQueue(QUEUE_NAMES.INSTAGRAM_ENRICHMENT);
   await queue.add('enrich', data, {
     jobId: `ig-enrich-${data.candidateId}-${Date.now()}`,
+  });
+}
+
+export async function enqueueVideoProcessing(data: VideoProcessingJobData) {
+  const queue = getQueue(QUEUE_NAMES.VIDEO_PROCESSING);
+  await queue.add('process', data, {
+    jobId: `video-process-${data.jobId}-${Date.now()}`,
   });
 }

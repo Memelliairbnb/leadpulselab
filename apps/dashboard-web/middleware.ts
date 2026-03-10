@@ -21,5 +21,6 @@ export const config = {
     '/scans/:path*',
     '/jobs/:path*',
     '/instagram/:path*',
+    '/video/:path*',
   ],
 };

@@ -16,3 +16,4 @@ export * from './sourcing';
 export * from './costs';
 export * from './reprocessing';
 export * from './instagram';
+export * from './video';

@@ -75,6 +75,12 @@ const iconMap: Record<string, React.ReactNode> = {
       <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
     </svg>
   ),
+  video: (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <polygon points="23 7 16 12 23 17 23 7" strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} />
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} />
+    </svg>
+  ),
 };
 
 export function Sidebar() {

@@ -14,6 +14,7 @@ export const navItems: NavItem[] = [
   { label: 'Pipelines', href: '/pipelines', icon: 'columns' },
   { label: 'Keywords', href: '/keywords', icon: 'hash' },
   { label: 'Instagram', href: '/instagram', icon: 'instagram' },
+  { label: 'Video', href: '/video', icon: 'video' },
   { label: 'Sources', href: '/sources', icon: 'radio' },
   { label: 'Inventory', href: '/inventory', icon: 'package' },
   { label: 'Analytics', href: '/analytics', icon: 'bar-chart' },

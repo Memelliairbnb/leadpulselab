@@ -13,6 +13,7 @@ export const QUEUE_NAMES = {
   INSTAGRAM_DISCOVERY: 'instagram_discovery_queue',
   INSTAGRAM_SCRUB: 'instagram_scrub_queue',
   INSTAGRAM_ENRICHMENT: 'instagram_enrichment_queue',
+  VIDEO_PROCESSING: 'video_processing_queue',
 } as const;
 
 const queues = new Map<string, Queue>();

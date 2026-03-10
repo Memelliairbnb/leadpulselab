@@ -59,3 +59,8 @@ export interface InstagramEnrichmentJobData {
   tenantId: number;
   candidateId: number;
 }
+
+export interface VideoProcessingJobData {
+  tenantId: number;
+  jobId: number;
+}

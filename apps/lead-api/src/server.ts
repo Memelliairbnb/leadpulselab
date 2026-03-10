@@ -16,6 +16,7 @@ import { campaignsRoutes } from './routes/campaigns';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { instagramRoutes } from './routes/instagram';
+import { videoRoutes } from './routes/video';
 
 export function buildServer() {
   const app = Fastify({
@@ -61,6 +62,7 @@ export function buildServer() {
     instance.register(campaignsRoutes, { prefix: '/campaigns' });
     instance.register(adminRoutes, { prefix: '/admin' });
     instance.register(instagramRoutes, { prefix: '/instagram' });
+    instance.register(videoRoutes, { prefix: '/video' });
   }, { prefix: '/api' });
 
   // Global error handler
