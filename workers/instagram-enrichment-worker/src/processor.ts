@@ -1,57 +1,47 @@
 import { Job } from "bullmq";
-import { db } from "@alh/db";
-import { sql } from "drizzle-orm";
-import { logger } from "@alh/observability";
+import {
+  db,
+  instagramProfileCandidates,
+  instagramContactCandidates,
+  instagramVerificationRuns,
+  instagramLeadScores,
+} from "@alh/db";
+import { eq, and } from "drizzle-orm";
 import type { InstagramEnrichmentJobData } from "@alh/queues";
+import { logger } from "@alh/observability";
+import dns from "node:dns";
+import { promisify } from "node:util";
 import http from "node:http";
 import https from "node:https";
-import { resolveMx } from "node:dns/promises";
+
+const resolveMx = promisify(dns.resolveMx);
 
 const log = logger.child({ module: "instagram-enrichment-processor" });
 
-const USER_AGENT = "Mozilla/5.0 (compatible; LeadPulseLab/1.0)";
+// ─── Constants ───────────────────────────────────────────────────────────────
 
-// ─── Utility helpers ────────────────────────────────────────────────────────
+const MX_TIMEOUT_MS = 5_000;
+const HTTP_TIMEOUT_MS = 10_000;
+const MAX_BODY_BYTES = 500 * 1024; // 500KB
+const POLITE_DELAY_MIN_MS = 2_000;
+const POLITE_DELAY_MAX_MS = 3_000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0",
+];
 
-/** Polite delay between external requests (2-3 seconds). */
-async function politeDelay(): Promise<void> {
-  const delay = 2000 + Math.random() * 1000;
-  await sleep(delay);
-}
-
-/** Simple HTTP GET that returns { status, body } or throws. */
-function httpGet(url: string, timeoutMs = 10_000): Promise<{ status: number; body: string }> {
-  return new Promise((resolve, reject) => {
-    const mod = url.startsWith("https") ? https : http;
-    const req = mod.get(url, { headers: { "User-Agent": USER_AGENT }, timeout: timeoutMs }, (res) => {
-      // Follow one redirect
-      if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
-        httpGet(res.headers.location, timeoutMs).then(resolve).catch(reject);
-        return;
-      }
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk: Buffer) => chunks.push(chunk));
-      res.on("end", () => {
-        resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf-8") });
-      });
-    });
-    req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Request timed out")); });
-  });
-}
-
-// ─── Regex patterns ─────────────────────────────────────────────────────────
+// ─── Regex patterns ──────────────────────────────────────────────────────────
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
-const PHONE_RE = /\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
+const PHONE_RE = /(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
+const SOCIAL_LINK_RE = /href=["'](https?:\/\/(?:www\.)?(?:facebook|twitter|x|linkedin|youtube|tiktok|pinterest)\.[a-z]+\/[^"']+)["']/gi;
 const CONTACT_PAGE_RE = /href=["']([^"']*(?:contact|about)[^"']*)["']/gi;
-const ADDRESS_RE = /\d{1,5}\s[\w\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Rd|Road|Ln|Lane|Way|Ct|Court|Pl|Place)[.,]?\s*(?:[A-Z]{2})?\s*\d{5}(?:-\d{4})?/gi;
 
-// ─── Disposable email blocklist ─────────────────────────────────────────────
+// ─── Disposable email domains ────────────────────────────────────────────────
 
 const DISPOSABLE_DOMAINS = new Set([
   "mailinator.com", "guerrillamail.com", "tempmail.com", "throwaway.email",
@@ -61,43 +51,85 @@ const DISPOSABLE_DOMAINS = new Set([
   "mohmal.com", "burnermail.io", "emailondeck.com", "tempail.com",
 ]);
 
-// ─── Valid US/CA area codes (abbreviated set of valid ones) ─────────────────
+// ─── Utility helpers ─────────────────────────────────────────────────────────
 
-const VALID_AREA_CODES = new Set([
-  // Major US area codes
-  "201","202","203","205","206","207","208","209","210","212","213","214","215",
-  "216","217","218","219","220","223","224","225","228","229","231","234","239",
-  "240","248","251","252","253","254","256","260","262","267","269","270","272",
-  "276","278","281","283","301","302","303","304","305","307","308","309","310",
-  "312","313","314","315","316","317","318","319","320","321","323","325","327",
-  "330","331","332","334","336","337","339","340","341","346","347","351","352",
-  "360","361","364","380","385","386","401","402","404","405","406","407","408",
-  "409","410","412","413","414","415","417","419","423","424","425","430","432",
-  "434","435","440","442","443","445","458","463","469","470","475","478","479",
-  "480","484","501","502","503","504","505","507","508","509","510","512","513",
-  "515","516","517","518","520","530","531","534","539","540","541","551","559",
-  "561","562","563","564","567","570","571","573","574","575","580","585","586",
-  "601","602","603","605","606","607","608","609","610","612","614","615","616",
-  "617","618","619","620","623","626","628","629","630","631","636","641","646",
-  "650","651","657","659","660","661","662","667","669","678","680","681","682",
-  "689","701","702","703","704","706","707","708","712","713","714","715","716",
-  "717","718","719","720","724","725","726","727","730","731","732","734","737",
-  "740","743","747","754","757","760","762","763","764","765","769","770","772",
-  "773","774","775","779","781","785","786","801","802","803","804","805","806",
-  "808","810","812","813","814","815","816","817","818","820","828","830","831",
-  "832","835","843","845","847","848","850","854","856","857","858","859","860",
-  "862","863","864","865","870","872","878","901","903","904","906","907","908",
-  "909","910","912","913","914","915","916","917","918","919","920","925","928",
-  "929","930","931","934","936","937","938","940","941","943","945","947","949",
-  "951","952","954","956","959","970","971","972","973","975","978","979","980",
-  "984","985","986","989",
-  // Major Canadian area codes
-  "204","226","236","249","250","289","306","343","365","403","416","418","431",
-  "437","438","450","506","514","519","548","579","581","587","604","613","639",
-  "647","705","709","778","780","807","819","825","867","873","902","905",
-]);
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-// ─── Step result tracking ───────────────────────────────────────────────────
+async function politeDelay(): Promise<void> {
+  const ms = POLITE_DELAY_MIN_MS + Math.random() * (POLITE_DELAY_MAX_MS - POLITE_DELAY_MIN_MS);
+  await sleep(ms);
+}
+
+function randomUserAgent(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+// ─── HTTP GET with redirect follow, body limit, timeout ──────────────────────
+
+function httpGet(
+  url: string,
+  opts: { timeoutMs?: number; maxBytes?: number; maxRedirects?: number } = {}
+): Promise<{ status: number; body: string }> {
+  const { timeoutMs = HTTP_TIMEOUT_MS, maxBytes = MAX_BODY_BYTES, maxRedirects = 3 } = opts;
+
+  return new Promise((resolve, reject) => {
+    if (maxRedirects < 0) {
+      return reject(new Error("Too many redirects"));
+    }
+
+    const mod = url.startsWith("https") ? https : http;
+    const req = mod.get(
+      url,
+      { headers: { "User-Agent": randomUserAgent() }, timeout: timeoutMs },
+      (res) => {
+        // Follow redirects
+        if (
+          (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) &&
+          res.headers.location
+        ) {
+          res.resume(); // Drain the response
+          const redirectUrl = res.headers.location.startsWith("http")
+            ? res.headers.location
+            : new URL(res.headers.location, url).toString();
+          httpGet(redirectUrl, { timeoutMs, maxBytes, maxRedirects: maxRedirects - 1 })
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        let bytesReceived = 0;
+        const chunks: Buffer[] = [];
+
+        res.on("data", (chunk: Buffer) => {
+          bytesReceived += chunk.length;
+          if (bytesReceived > maxBytes) {
+            res.destroy();
+            // Resolve with what we have — partial body is fine for extraction
+            resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf-8") });
+            return;
+          }
+          chunks.push(chunk);
+        });
+
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf-8") });
+        });
+
+        res.on("error", reject);
+      }
+    );
+
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error(`HTTP request timed out after ${timeoutMs}ms`));
+    });
+  });
+}
+
+// ─── Step result tracking ────────────────────────────────────────────────────
 
 interface StepResult {
   stepName: string;
@@ -114,14 +146,15 @@ async function runStep(
   const start = Date.now();
   try {
     const output = await fn();
+    const hasOutput = Object.keys(output).length > 0;
     return {
       stepName,
-      stepStatus: Object.keys(output).length > 0 ? "success" : "skipped",
+      stepStatus: hasOutput ? "success" : "skipped",
       output,
       durationMs: Date.now() - start,
     };
   } catch (err) {
-    const error = err as Error;
+    const error = err instanceof Error ? err : new Error(String(err));
     log.warn({ stepName, error: error.message }, "Enrichment step failed, continuing");
     return {
       stepName,
@@ -133,97 +166,148 @@ async function runStep(
   }
 }
 
-// ─── DNS MX check ───────────────────────────────────────────────────────────
+// ─── Verification run logger ─────────────────────────────────────────────────
 
-async function checkMxRecord(email: string): Promise<boolean> {
+async function logVerificationStep(
+  tenantId: number,
+  candidateId: number,
+  result: StepResult
+): Promise<void> {
   try {
-    const domain = email.split("@")[1];
-    const records = await resolveMx(domain);
-    return records.length > 0;
-  } catch {
-    return false;
+    await db.insert(instagramVerificationRuns).values({
+      tenantId,
+      candidateId,
+      stepName: result.stepName,
+      stepStatus: result.stepStatus,
+      outputDataJson: result.output,
+      durationMs: result.durationMs,
+      errorMessage: result.error ?? null,
+    });
+  } catch (err) {
+    log.warn({ error: (err as Error).message, stepName: result.stepName }, "Failed to write verification log entry");
   }
 }
 
-function isDisposableEmail(email: string): boolean {
-  const domain = email.split("@")[1]?.toLowerCase();
-  return DISPOSABLE_DOMAINS.has(domain);
+// ─── Step 1: Email MX Verification ───────────────────────────────────────────
+
+interface MxResult {
+  email: string;
+  verified: boolean;
+  isDisposable: boolean;
+  hasMx: boolean;
+  domain: string;
 }
 
-// ─── Phone validation ───────────────────────────────────────────────────────
+async function verifyEmailMx(email: string): Promise<MxResult> {
+  const domain = email.split("@")[1]?.toLowerCase() ?? "";
+  const result: MxResult = {
+    email,
+    verified: false,
+    isDisposable: false,
+    hasMx: false,
+    domain,
+  };
 
-function normalizePhoneDigits(phone: string): string {
-  return phone.replace(/\D/g, "");
-}
-
-function isValidPhone(phone: string): { valid: boolean; areaCode: string } {
-  const digits = normalizePhoneDigits(phone);
-  // Strip leading 1 for US/CA
-  const normalized = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
-  if (normalized.length < 10 || normalized.length > 15) {
-    return { valid: false, areaCode: "" };
+  // Check disposable
+  if (DISPOSABLE_DOMAINS.has(domain)) {
+    result.isDisposable = true;
+    return result;
   }
-  const areaCode = normalized.slice(0, 3);
-  return { valid: VALID_AREA_CODES.has(areaCode), areaCode };
+
+  // MX lookup with timeout
+  try {
+    const records = await Promise.race([
+      resolveMx(domain),
+      sleep(MX_TIMEOUT_MS).then(() => {
+        throw new Error("MX lookup timed out");
+      }),
+    ]) as dns.MxRecord[];
+
+    result.hasMx = records.length > 0;
+    result.verified = records.length > 0;
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    // ENOTFOUND = invalid domain, ENODATA = no MX records
+    if (error.message.includes("ENOTFOUND")) {
+      log.debug({ email, domain }, "Domain does not exist");
+    } else if (error.message.includes("ENODATA")) {
+      log.debug({ email, domain }, "No MX records for domain");
+    } else {
+      log.debug({ email, domain, error: error.message }, "MX lookup failed");
+    }
+  }
+
+  return result;
 }
 
-// ─── Website scraping ───────────────────────────────────────────────────────
+// ─── Step 2: Website Scrape ──────────────────────────────────────────────────
 
 interface WebsiteScrapeResult {
   emails: string[];
   phones: string[];
-  businessName?: string;
-  address?: string;
+  businessName: string | null;
+  socialLinks: string[];
   contactPageFound: boolean;
+  pagesScraped: number;
 }
 
 async function scrapeWebsite(websiteUrl: string): Promise<WebsiteScrapeResult> {
   const result: WebsiteScrapeResult = {
     emails: [],
     phones: [],
+    businessName: null,
+    socialLinks: [],
     contactPageFound: false,
+    pagesScraped: 0,
   };
 
   // Fetch main page
-  await politeDelay();
-  let mainBody: string;
-  try {
-    const resp = await httpGet(websiteUrl);
-    if (resp.status !== 200) return result;
-    mainBody = resp.body;
-  } catch {
+  const resp = await httpGet(websiteUrl);
+  if (resp.status !== 200) {
+    log.debug({ websiteUrl, status: resp.status }, "Website returned non-200 status");
     return result;
   }
+  result.pagesScraped++;
 
-  // Extract emails from main page
-  const mainEmails = mainBody.match(EMAIL_RE) ?? [];
+  const body = resp.body;
+
+  // Extract emails
+  const mainEmails = body.match(EMAIL_RE) ?? [];
   result.emails.push(...mainEmails);
 
-  // Extract phones from main page
-  const mainPhones = mainBody.match(PHONE_RE) ?? [];
+  // Extract phones
+  const mainPhones = body.match(PHONE_RE) ?? [];
   result.phones.push(...mainPhones);
 
   // Extract business name from <title>
-  const titleMatch = mainBody.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const titleMatch = body.match(/<title[^>]*>([^<]+)<\/title>/i);
   if (titleMatch) {
-    result.businessName = titleMatch[1].trim().split(/[|\-\u2013\u2014]/)[0].trim();
+    result.businessName = titleMatch[1].trim().split(/[|\-\u2013\u2014]/)[0].trim() || null;
   }
 
-  // Extract address from main page
-  const addressMatches = mainBody.match(ADDRESS_RE);
-  if (addressMatches && addressMatches.length > 0) {
-    result.address = addressMatches[0].trim();
+  // Fall back to og:site_name or og:title
+  if (!result.businessName) {
+    const ogSiteName = body.match(/<meta\s+(?:property|name)=["']og:site_name["']\s+content=["']([^"']+)["']/i);
+    if (ogSiteName) {
+      result.businessName = ogSiteName[1].trim();
+    }
   }
 
-  // Look for contact page links
+  // Extract social links
+  let socialMatch: RegExpExecArray | null;
+  SOCIAL_LINK_RE.lastIndex = 0;
+  while ((socialMatch = SOCIAL_LINK_RE.exec(body)) !== null) {
+    result.socialLinks.push(socialMatch[1]);
+  }
+
+  // Look for contact/about page and scrape it
   const contactLinks: string[] = [];
   let contactMatch: RegExpExecArray | null;
   CONTACT_PAGE_RE.lastIndex = 0;
-  while ((contactMatch = CONTACT_PAGE_RE.exec(mainBody)) !== null) {
+  while ((contactMatch = CONTACT_PAGE_RE.exec(body)) !== null) {
     contactLinks.push(contactMatch[1]);
   }
 
-  // Fetch first contact/about page found
   if (contactLinks.length > 0) {
     result.contactPageFound = true;
     const contactHref = contactLinks[0];
@@ -232,485 +316,418 @@ async function scrapeWebsite(websiteUrl: string): Promise<WebsiteScrapeResult> {
       : new URL(contactHref, websiteUrl).toString();
 
     await politeDelay();
+
     try {
       const contactResp = await httpGet(contactUrl);
       if (contactResp.status === 200) {
-        const contactEmails = contactResp.body.match(EMAIL_RE) ?? [];
+        result.pagesScraped++;
+        const contactBody = contactResp.body;
+
+        const contactEmails = contactBody.match(EMAIL_RE) ?? [];
         result.emails.push(...contactEmails);
 
-        const contactPhones = contactResp.body.match(PHONE_RE) ?? [];
+        const contactPhones = contactBody.match(PHONE_RE) ?? [];
         result.phones.push(...contactPhones);
-
-        // Try address from contact page too
-        if (!result.address) {
-          const contactAddresses = contactResp.body.match(ADDRESS_RE);
-          if (contactAddresses && contactAddresses.length > 0) {
-            result.address = contactAddresses[0].trim();
-          }
-        }
       }
-    } catch {
-      // Non-fatal: contact page fetch failed
+    } catch (err) {
+      log.debug({ contactUrl, error: (err as Error).message }, "Contact page fetch failed");
     }
   }
 
-  // Dedupe
-  result.emails = [...new Set(result.emails)];
+  // Deduplicate
+  result.emails = [...new Set(result.emails.map((e) => e.toLowerCase()))];
   result.phones = [...new Set(result.phones)];
+  result.socialLinks = [...new Set(result.socialLinks)];
 
   return result;
 }
 
-// ─── Verification run logger ────────────────────────────────────────────────
+// ─── Contact ranking definitions ─────────────────────────────────────────────
 
-async function logVerificationStep(
-  tenantId: number,
-  candidateId: number,
-  result: StepResult
-): Promise<void> {
-  try {
-    await db.execute(sql`
-      INSERT INTO instagram_verification_runs (tenant_id, candidate_id, step_name, step_status, output_data_json, duration_ms, error_message)
-      VALUES (${tenantId}, ${candidateId}, ${result.stepName}, ${result.stepStatus}, ${JSON.stringify(result.output)}::jsonb, ${result.durationMs}, ${result.error ?? null})
-    `);
-  } catch (err) {
-    log.warn({ error: (err as Error).message }, "Failed to write verification log entry");
-  }
+interface RankedContact {
+  contactType: string;
+  contactValue: string;
+  source: string;
+  isVerified: boolean;
+  verificationMethod: string | null;
+  verificationResult: string | null;
+  priorityRank: number;
 }
 
-// ─── Main processor ─────────────────────────────────────────────────────────
+// ─── Main Processor ──────────────────────────────────────────────────────────
 
 export async function processInstagramEnrichment(job: Job<InstagramEnrichmentJobData>) {
   const { tenantId, candidateId } = job.data;
 
-  // ─── Step 1: Load Candidate ─────────────────────────────────────────────
-  const candidateRows = await db.execute(sql`
-    SELECT * FROM instagram_profile_candidates WHERE id = ${candidateId} AND tenant_id = ${tenantId} LIMIT 1
-  `);
+  log.info({ tenantId, candidateId, jobId: job.id }, "Starting instagram enrichment");
 
-  const rows = candidateRows as unknown as Record<string, unknown>[];
-  const candidate = rows?.[0] as Record<string, unknown> | undefined;
+  // ── Fetch candidate ────────────────────────────────────────────────────────
+
+  const candidates = await db
+    .select()
+    .from(instagramProfileCandidates)
+    .where(
+      and(
+        eq(instagramProfileCandidates.id, candidateId),
+        eq(instagramProfileCandidates.tenantId, tenantId)
+      )
+    )
+    .limit(1);
+
+  const candidate = candidates[0];
   if (!candidate) {
-    throw new Error(`Instagram candidate not found: ${candidateId}`);
+    throw new Error(`Candidate not found: id=${candidateId} tenant=${tenantId}`);
   }
 
   log.info(
-    { candidateId, handle: candidate.instagram_handle, tenantId },
-    "Starting instagram enrichment pipeline"
+    { candidateId, handle: candidate.instagramHandle, tenantId },
+    "Loaded candidate for enrichment"
   );
 
-  // Accumulate resolved data
-  let verifiedEmail: string | null = null;
-  let emailVerified = false;
-  let verifiedPhone: string | null = null;
-  let phoneVerified = false;
-  let websiteScrape: WebsiteScrapeResult | null = null;
-  let websiteScrapeFailed = false;
+  // Accumulators — using mutable container so closures can write to it
+  const allContacts: RankedContact[] = [];
+  const state = {
+    bioEmailVerified: false,
+    anyEmailVerified: false,
+    anyPhoneFound: false,
+    websiteScrapeData: null as WebsiteScrapeResult | null,
+    websiteScrapeFailed: false,
+  };
 
-  // ─── Step 2: Email Verification ─────────────────────────────────────────
-  const step2 = await runStep("email_verification", async () => {
-    const normalizedEmail = candidate.normalized_email as string | null;
-    if (!normalizedEmail) return {};
+  // ── Step 1: Email MX Verification ──────────────────────────────────────────
 
-    // Check disposable
-    if (isDisposableEmail(normalizedEmail)) {
-      return { email: normalizedEmail, status: "disposable", verified: false };
+  const step1 = await runStep("email_mx_verification", async () => {
+    if (!candidate.normalizedEmail) {
+      return {};
     }
 
-    // Check MX record
-    const hasMx = await checkMxRecord(normalizedEmail);
-    if (hasMx) {
-      verifiedEmail = normalizedEmail;
-      emailVerified = true;
-      return { email: normalizedEmail, status: "mx_verified", verified: true };
-    }
+    const mxResult = await verifyEmailMx(candidate.normalizedEmail);
 
-    return { email: normalizedEmail, status: "no_mx", verified: false };
-  });
-  await logVerificationStep(tenantId, candidateId, step2);
+    if (mxResult.verified) {
+      state.bioEmailVerified = true;
+      state.anyEmailVerified = true;
 
-  // ─── Step 3: Phone Verification ─────────────────────────────────────────
-  const step3 = await runStep("phone_verification", async () => {
-    const normalizedPhone = candidate.normalized_phone as string | null;
-    if (!normalizedPhone) return {};
-
-    const { valid, areaCode } = isValidPhone(normalizedPhone);
-    if (valid) {
-      verifiedPhone = normalizedPhone;
-      phoneVerified = true;
-      return { phone: normalizedPhone, status: "basic_verified", areaCode, verified: true };
-    }
-
-    return { phone: normalizedPhone, status: "invalid_format", areaCode, verified: false };
-  });
-  await logVerificationStep(tenantId, candidateId, step3);
-
-  // ─── Step 4: Website Scraping ───────────────────────────────────────────
-  const step4 = await runStep("website_scraping", async () => {
-    const websiteUrl = candidate.website_url as string | null;
-    if (!websiteUrl) return {};
-
-    try {
-      websiteScrape = await scrapeWebsite(websiteUrl);
-    } catch {
-      websiteScrapeFailed = true;
-      return { status: "scrape_failed" };
+      allContacts.push({
+        contactType: "email",
+        contactValue: candidate.normalizedEmail,
+        source: "bio",
+        isVerified: true,
+        verificationMethod: "dns_mx",
+        verificationResult: "pass",
+        priorityRank: 1, // Verified email = priority 1
+      });
+    } else if (!mxResult.isDisposable) {
+      // Bio email exists but unverified — still record as priority 2
+      allContacts.push({
+        contactType: "email",
+        contactValue: candidate.normalizedEmail,
+        source: "bio",
+        isVerified: false,
+        verificationMethod: "dns_mx",
+        verificationResult: mxResult.isDisposable ? "disposable" : "no_mx",
+        priorityRank: 2, // Bio email (unverified) = priority 2
+      });
     }
 
     return {
-      emailsFound: websiteScrape.emails.length,
-      phonesFound: websiteScrape.phones.length,
-      businessName: websiteScrape.businessName ?? null,
-      address: websiteScrape.address ?? null,
-      contactPageFound: websiteScrape.contactPageFound,
+      email: mxResult.email,
+      domain: mxResult.domain,
+      verified: mxResult.verified,
+      isDisposable: mxResult.isDisposable,
+      hasMx: mxResult.hasMx,
+    };
+  });
+  await logVerificationStep(tenantId, candidateId, step1);
+
+  // ── Step 2: Website Scrape ─────────────────────────────────────────────────
+
+  const step2 = await runStep("website_scrape", async () => {
+    if (!candidate.websiteUrl) {
+      return {};
+    }
+
+    await politeDelay();
+
+    try {
+      state.websiteScrapeData = await scrapeWebsite(candidate.websiteUrl);
+    } catch (err) {
+      state.websiteScrapeFailed = true;
+      throw err; // runStep catches this
+    }
+
+    const scrape = state.websiteScrapeData;
+
+    // Process website emails — verify each via MX
+    for (const email of scrape.emails) {
+      // Skip if it's the same as bio email (already processed)
+      if (email.toLowerCase() === candidate.normalizedEmail?.toLowerCase()) {
+        continue;
+      }
+
+      const mxResult = await verifyEmailMx(email);
+      if (mxResult.verified) {
+        state.anyEmailVerified = true;
+        allContacts.push({
+          contactType: "email",
+          contactValue: email,
+          source: "website",
+          isVerified: true,
+          verificationMethod: "dns_mx",
+          verificationResult: "pass",
+          priorityRank: 3, // Website email = priority 3
+        });
+      } else if (!mxResult.isDisposable) {
+        allContacts.push({
+          contactType: "email",
+          contactValue: email,
+          source: "website",
+          isVerified: false,
+          verificationMethod: "dns_mx",
+          verificationResult: "no_mx",
+          priorityRank: 3,
+        });
+      }
+    }
+
+    // Process website phones
+    for (const phone of scrape.phones) {
+      state.anyPhoneFound = true;
+      allContacts.push({
+        contactType: "phone",
+        contactValue: phone,
+        source: "website",
+        isVerified: false,
+        verificationMethod: null,
+        verificationResult: null,
+        priorityRank: 5, // Website phone = priority 5
+      });
+    }
+
+    return {
+      emailsFound: scrape.emails.length,
+      phonesFound: scrape.phones.length,
+      businessName: scrape.businessName,
+      socialLinksFound: scrape.socialLinks.length,
+      contactPageFound: scrape.contactPageFound,
+      pagesScraped: scrape.pagesScraped,
+    };
+  });
+  await logVerificationStep(tenantId, candidateId, step2);
+
+  // Add bio phone if present (priority 4 — phone from bio)
+  if (candidate.normalizedPhone) {
+    state.anyPhoneFound = true;
+    allContacts.push({
+      contactType: "phone",
+      contactValue: candidate.normalizedPhone,
+      source: "bio",
+      isVerified: false,
+      verificationMethod: null,
+      verificationResult: null,
+      priorityRank: 4, // Phone from bio = priority 4
+    });
+  }
+
+  // ── Step 3: Contact Ranking ────────────────────────────────────────────────
+
+  const step3 = await runStep("contact_ranking", async () => {
+    // Sort contacts by priority rank
+    allContacts.sort((a, b) => a.priorityRank - b.priorityRank);
+
+    // Deduplicate by contactValue (keep highest priority = lowest rank number)
+    const seen = new Set<string>();
+    const dedupedContacts: RankedContact[] = [];
+    for (const contact of allContacts) {
+      const key = `${contact.contactType}:${contact.contactValue.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        dedupedContacts.push(contact);
+      }
+    }
+
+    // Re-number priority ranks sequentially
+    dedupedContacts.forEach((c, i) => {
+      c.priorityRank = i + 1;
+    });
+
+    // Insert into instagramContactCandidates
+    for (const contact of dedupedContacts) {
+      try {
+        await db.insert(instagramContactCandidates).values({
+          tenantId,
+          candidateId,
+          contactType: contact.contactType,
+          contactValue: contact.contactValue,
+          source: contact.source,
+          isVerified: contact.isVerified,
+          verificationMethod: contact.verificationMethod,
+          verificationResult: contact.verificationResult,
+          priorityRank: contact.priorityRank,
+        });
+      } catch (err) {
+        log.warn(
+          { error: (err as Error).message, contactValue: contact.contactValue },
+          "Failed to insert contact candidate"
+        );
+      }
+    }
+
+    return {
+      totalContacts: dedupedContacts.length,
+      verifiedEmails: dedupedContacts.filter((c) => c.contactType === "email" && c.isVerified).length,
+      unverifiedEmails: dedupedContacts.filter((c) => c.contactType === "email" && !c.isVerified).length,
+      phones: dedupedContacts.filter((c) => c.contactType === "phone").length,
+      ranking: dedupedContacts.map((c) => ({
+        rank: c.priorityRank,
+        type: c.contactType,
+        source: c.source,
+        verified: c.isVerified,
+      })),
+    };
+  });
+  await logVerificationStep(tenantId, candidateId, step3);
+
+  // ── Calculate final scores ─────────────────────────────────────────────────
+
+  const nicheFitScore = candidate.nicheFitScore ?? 0;
+  const scrapeResult = state.websiteScrapeData;
+
+  // Contactability score: updated based on what we found
+  let contactabilityScore = candidate.contactabilityScore ?? 0;
+  if (state.anyEmailVerified) contactabilityScore = Math.max(contactabilityScore, 80);
+  else if (allContacts.some((c) => c.contactType === "email")) contactabilityScore = Math.max(contactabilityScore, 60);
+  if (state.anyPhoneFound) contactabilityScore = Math.max(contactabilityScore, Math.min(contactabilityScore + 20, 100));
+  if (scrapeResult?.contactPageFound) contactabilityScore = Math.max(contactabilityScore, Math.min(contactabilityScore + 10, 100));
+
+  // Verification score: based on MX verify results
+  let verificationScore = 0;
+  if (state.bioEmailVerified) verificationScore += 50;
+  if (state.anyEmailVerified && !state.bioEmailVerified) verificationScore += 30; // website email verified
+  if (state.anyPhoneFound) verificationScore += 20;
+  if (scrapeResult && !state.websiteScrapeFailed) verificationScore += 15;
+  if (scrapeResult?.contactPageFound) verificationScore += 10;
+  if (scrapeResult?.businessName) verificationScore += 5;
+  verificationScore = Math.min(verificationScore, 100);
+
+  // Weighted average: niche_fit 35%, contactability 35%, verification 30%
+  const finalQualificationScore = Math.round(
+    nicheFitScore * 0.35 +
+    contactabilityScore * 0.35 +
+    verificationScore * 0.30
+  );
+
+  // Qualification status
+  const hasVerifiedContact = state.anyEmailVerified || (state.anyPhoneFound && allContacts.some((c) => c.contactType === "phone"));
+  let qualificationStatus: string;
+  let newPrequalStatus: string;
+
+  if (hasVerifiedContact && finalQualificationScore >= 50) {
+    qualificationStatus = "qualified";
+    newPrequalStatus = "qualified";
+  } else if (allContacts.length > 0 && finalQualificationScore < 50) {
+    qualificationStatus = "partial_inventory";
+    newPrequalStatus = "partial_inventory";
+  } else if (allContacts.length > 0) {
+    // Has some contact but doesn't meet the "verified + >= 50" bar
+    qualificationStatus = "partial_inventory";
+    newPrequalStatus = "partial_inventory";
+  } else {
+    qualificationStatus = "discarded";
+    newPrequalStatus = "discarded";
+  }
+
+  // If website scrape failed, mark for reprocessing instead of discarding
+  if (qualificationStatus === "discarded" && state.websiteScrapeFailed && candidate.websiteUrl) {
+    qualificationStatus = "partial_inventory";
+    newPrequalStatus = "reprocess";
+  }
+
+  const scoringNotes = [
+    `niche_fit=${nicheFitScore}`,
+    `contactability=${contactabilityScore}`,
+    `verification=${verificationScore}`,
+    `final=${finalQualificationScore}`,
+    `bio_email_verified=${state.bioEmailVerified}`,
+    `any_email_verified=${state.anyEmailVerified}`,
+    `phone_found=${state.anyPhoneFound}`,
+    `website_scraped=${!!scrapeResult}`,
+    `contact_page=${scrapeResult?.contactPageFound ?? false}`,
+    `total_contacts=${allContacts.length}`,
+  ].join(", ");
+
+  // ── Insert lead score ──────────────────────────────────────────────────────
+
+  const step4 = await runStep("insert_lead_score", async () => {
+    const contactPathRanking = allContacts.map((c) => ({
+      rank: c.priorityRank,
+      type: c.contactType,
+      value: c.contactValue,
+      source: c.source,
+      verified: c.isVerified,
+    }));
+
+    await db.insert(instagramLeadScores).values({
+      tenantId,
+      candidateId,
+      nicheFitScore,
+      contactabilityScore,
+      verificationScore,
+      finalQualificationScore: finalQualificationScore,
+      qualificationStatus,
+      contactPathRanking,
+      scoringNotes,
+    });
+
+    return {
+      nicheFitScore,
+      contactabilityScore,
+      verificationScore,
+      finalQualificationScore,
+      qualificationStatus,
     };
   });
   await logVerificationStep(tenantId, candidateId, step4);
 
-  // ─── Step 5: Resolve Business Identity ──────────────────────────────────
-  const step5 = await runStep("resolve_business_identity", async () => {
-    // Best name: display_name from Instagram, or business name from website
-    const bestName = (candidate.display_name as string | null)
-      ?? websiteScrape?.businessName
-      ?? null;
+  // ── Update candidate prequal_status ────────────────────────────────────────
 
-    // Best email: verified email from bio, or first email from website
-    const bestEmail = verifiedEmail
-      ?? (websiteScrape?.emails?.[0] ?? null);
-    // If we picked up email from website and haven't verified yet, quick MX check
-    if (!verifiedEmail && bestEmail) {
-      const hasMx = await checkMxRecord(bestEmail);
-      if (hasMx && !isDisposableEmail(bestEmail)) {
-        verifiedEmail = bestEmail;
-        emailVerified = true;
-      }
-    }
-
-    // Best phone: verified phone from bio, or first phone from website
-    const bestPhone = verifiedPhone
-      ?? (websiteScrape?.phones?.[0] ?? null);
-    if (!verifiedPhone && bestPhone) {
-      const { valid } = isValidPhone(bestPhone);
-      if (valid) {
-        verifiedPhone = bestPhone;
-        phoneVerified = true;
-      }
-    }
-
-    // Best location
-    const bestLocation = (candidate.location_clues as string | null)
-      ?? websiteScrape?.address
-      ?? null;
-
-    // Category
-    const bestCategory = (candidate.category as string | null) ?? null;
+  const step5 = await runStep("update_candidate_status", async () => {
+    await db
+      .update(instagramProfileCandidates)
+      .set({
+        prequalStatus: newPrequalStatus,
+        contactabilityScore,
+        updatedAt: new Date(),
+      })
+      .where(eq(instagramProfileCandidates.id, candidateId));
 
     return {
-      bestName,
-      bestEmail: verifiedEmail,
-      bestPhone: verifiedPhone,
-      bestLocation,
-      bestCategory,
+      previousStatus: candidate.prequalStatus,
+      newStatus: newPrequalStatus,
+      contactabilityScore,
     };
   });
   await logVerificationStep(tenantId, candidateId, step5);
 
-  const resolved = step5.output as {
-    bestName: string | null;
-    bestEmail: string | null;
-    bestPhone: string | null;
-    bestLocation: string | null;
-    bestCategory: string | null;
-  };
-
-  // ─── Step 6: Contact Path Ranking ───────────────────────────────────────
-  const step6 = await runStep("contact_path_ranking", async () => {
-    const contactPaths: Array<{
-      contactType: string;
-      contactValue: string;
-      source: string;
-      isVerified: boolean;
-      rank: number;
-    }> = [];
-
-    if (verifiedEmail) {
-      contactPaths.push({
-        contactType: "verified_public_email",
-        contactValue: verifiedEmail,
-        source: emailVerified && candidate.normalized_email ? "bio" : "website",
-        isVerified: true,
-        rank: 1,
-      });
-    }
-
-    if (verifiedPhone) {
-      contactPaths.push({
-        contactType: "verified_public_phone",
-        contactValue: verifiedPhone,
-        source: phoneVerified && candidate.normalized_phone ? "bio" : "website",
-        isVerified: true,
-        rank: 2,
-      });
-    }
-
-    if (websiteScrape?.contactPageFound) {
-      const websiteUrl = candidate.website_url as string;
-      contactPaths.push({
-        contactType: "website_contact_form",
-        contactValue: websiteUrl,
-        source: "website",
-        isVerified: false,
-        rank: 3,
-      });
-    }
-
-    // DM path is always available for Instagram
-    const profileUrl = candidate.profile_url as string | null;
-    if (profileUrl) {
-      contactPaths.push({
-        contactType: "dm_path",
-        contactValue: profileUrl,
-        source: "instagram",
-        isVerified: false,
-        rank: 4,
-      });
-    }
-
-    // Insert contact candidates
-    for (const cp of contactPaths) {
-      await db.execute(sql`
-        INSERT INTO instagram_contact_candidates
-          (tenant_id, candidate_id, contact_type, contact_value, source, is_verified, verification_method, verification_result, priority_rank)
-        VALUES
-          (${tenantId}, ${candidateId}, ${cp.contactType}, ${cp.contactValue}, ${cp.source}, ${cp.isVerified},
-           ${cp.isVerified ? "automated" : null}, ${cp.isVerified ? "pass" : null}, ${cp.rank})
-      `);
-    }
-
-    return { contactPaths };
-  });
-  await logVerificationStep(tenantId, candidateId, step6);
-
-  // ─── Step 7: Final Qualification Score (0-100) ──────────────────────────
-  const step7 = await runStep("final_qualification_score", async () => {
-    let score = 0;
-
-    if (verifiedEmail) score += 35;
-    if (verifiedPhone) score += 25;
-    if (websiteScrape?.contactPageFound) score += 15;
-    if ((candidate.profile_type as string) === "business") score += 10;
-    const nicheFitScore = candidate.niche_fit_score as number | null;
-    if (nicheFitScore && nicheFitScore >= 60) score += 10;
-    if (resolved.bestLocation) score += 5;
-
-    // Cap at 100
-    score = Math.min(score, 100);
-
-    return { finalScore: score };
-  });
-  await logVerificationStep(tenantId, candidateId, step7);
-
-  const finalScore = (step7.output.finalScore as number) ?? 0;
-
-  // ─── Step 8: Qualification Decision ─────────────────────────────────────
-  const step8 = await runStep("qualification_decision", async () => {
-    const nicheFitScore = candidate.niche_fit_score as number | null;
-    const hasNicheFit = (nicheFitScore ?? 0) > 50;
-
-    let qualStatus: string;
-
-    if (verifiedEmail && verifiedPhone && hasNicheFit) {
-      qualStatus = "qualified_lead";
-    } else if (verifiedEmail || verifiedPhone) {
-      qualStatus = "partial_inventory";
-    } else if (websiteScrapeFailed) {
-      qualStatus = "reprocess_later";
-    } else {
-      qualStatus = "discard";
-    }
-
-    return { qualificationStatus: qualStatus };
-  });
-  await logVerificationStep(tenantId, candidateId, step8);
-
-  const qualStatus = step8.output.qualificationStatus as string;
-
-  // ─── Step 9: Insert Final Score ─────────────────────────────────────────
-  const step9 = await runStep("insert_lead_score", async () => {
-    const nicheFitScore = candidate.niche_fit_score as number ?? 0;
-    const contactabilityScore = candidate.contactability_score as number ?? 0;
-    const verificationScore = (emailVerified ? 50 : 0) + (phoneVerified ? 50 : 0);
-
-    const contactPaths = (step6.output.contactPaths as Array<Record<string, unknown>>) ?? [];
-
-    await db.execute(sql`
-      INSERT INTO instagram_lead_scores
-        (tenant_id, candidate_id, niche_fit_score, contactability_score, verification_score,
-         final_qualification_score, qualification_status, contact_path_ranking, scoring_notes)
-      VALUES
-        (${tenantId}, ${candidateId}, ${nicheFitScore}, ${contactabilityScore}, ${verificationScore},
-         ${finalScore}, ${qualStatus}, ${JSON.stringify(contactPaths)}::jsonb,
-         ${`email_verified=${emailVerified}, phone_verified=${phoneVerified}, website_scraped=${!!websiteScrape}, contact_page=${websiteScrape?.contactPageFound ?? false}`})
-    `);
-
-    return { inserted: true, finalScore, qualStatus };
-  });
-  await logVerificationStep(tenantId, candidateId, step9);
-
-  // ─── Step 10: Create Qualified Lead ─────────────────────────────────────
-  const step10 = await runStep("create_qualified_lead", async () => {
-    if (qualStatus === "qualified_lead") {
-      const bestContactMethod = verifiedEmail
-        ? `email:${verifiedEmail}`
-        : verifiedPhone
-          ? `phone:${verifiedPhone}`
-          : (candidate.profile_url as string) ?? "dm";
-
-      const identityConfidence = computeIdentityConfidence(
-        emailVerified, phoneVerified, !!websiteScrape, !!resolved.bestName, !!resolved.bestLocation
-      );
-
-      await db.execute(sql`
-        INSERT INTO qualified_leads
-          (tenant_id, full_name, company_name, lead_type, intent_level, lead_score,
-           ai_confidence, ai_summary, ai_signals_json,
-           platform, profile_url, contact_method, contact_type,
-           status, resolution_status, identity_confidence,
-           resolved_email, resolved_phone, resolved_website, resolved_company,
-           email_verified, phone_verified, needs_review)
-        VALUES
-          (${tenantId},
-           ${resolved.bestName ?? (candidate.display_name as string | null) ?? (candidate.instagram_handle as string)},
-           ${resolved.bestName ?? null},
-           ${"instagram_lead"},
-           ${"high"},
-           ${finalScore},
-           ${0.85},
-           ${`Instagram qualified lead: ${candidate.instagram_handle}. Verified email: ${emailVerified}, verified phone: ${phoneVerified}.`},
-           ${JSON.stringify([])}::jsonb,
-           ${"instagram"},
-           ${(candidate.profile_url as string | null) ?? `https://instagram.com/${candidate.instagram_handle}`},
-           ${bestContactMethod},
-           ${verifiedEmail ? "email" : verifiedPhone ? "phone" : "dm"},
-           ${"new"},
-           ${"qualified"},
-           ${identityConfidence},
-           ${verifiedEmail},
-           ${verifiedPhone},
-           ${(candidate.website_url as string | null) ?? null},
-           ${resolved.bestName ?? null},
-           ${emailVerified},
-           ${phoneVerified},
-           ${true})
-      `);
-
-      return { created: true, status: "qualified_lead", leadScore: finalScore };
-    }
-
-    if (qualStatus === "partial_inventory") {
-      const cappedScore = Math.min(finalScore, 60);
-      const bestContactMethod = verifiedEmail
-        ? `email:${verifiedEmail}`
-        : verifiedPhone
-          ? `phone:${verifiedPhone}`
-          : (candidate.profile_url as string) ?? "dm";
-
-      const identityConfidence = computeIdentityConfidence(
-        emailVerified, phoneVerified, !!websiteScrape, !!resolved.bestName, !!resolved.bestLocation
-      );
-
-      await db.execute(sql`
-        INSERT INTO qualified_leads
-          (tenant_id, full_name, company_name, lead_type, intent_level, lead_score,
-           ai_confidence, ai_summary, ai_signals_json,
-           platform, profile_url, contact_method, contact_type,
-           status, resolution_status, identity_confidence,
-           resolved_email, resolved_phone, resolved_website, resolved_company,
-           email_verified, phone_verified, needs_review)
-        VALUES
-          (${tenantId},
-           ${resolved.bestName ?? (candidate.display_name as string | null) ?? (candidate.instagram_handle as string)},
-           ${resolved.bestName ?? null},
-           ${"instagram_lead"},
-           ${"medium"},
-           ${cappedScore},
-           ${0.60},
-           ${`Instagram partial inventory: ${candidate.instagram_handle}. Missing full contact verification.`},
-           ${JSON.stringify([])}::jsonb,
-           ${"instagram"},
-           ${(candidate.profile_url as string | null) ?? `https://instagram.com/${candidate.instagram_handle}`},
-           ${bestContactMethod},
-           ${verifiedEmail ? "email" : verifiedPhone ? "phone" : "dm"},
-           ${"new"},
-           ${"partial_inventory"},
-           ${identityConfidence},
-           ${verifiedEmail},
-           ${verifiedPhone},
-           ${(candidate.website_url as string | null) ?? null},
-           ${resolved.bestName ?? null},
-           ${emailVerified},
-           ${phoneVerified},
-           ${true})
-      `);
-
-      return { created: true, status: "partial_inventory", leadScore: cappedScore };
-    }
-
-    return { created: false, status: qualStatus };
-  });
-  await logVerificationStep(tenantId, candidateId, step10);
-
-  // ─── Step 11: Log Final Verification Summary ───────────────────────────
-  const step11 = await runStep("verification_summary", async () => {
-    return {
-      candidateId,
-      instagramHandle: candidate.instagram_handle,
-      qualificationStatus: qualStatus,
-      finalScore,
-      emailVerified,
-      phoneVerified,
-      websiteScraped: !!websiteScrape,
-      contactPageFound: websiteScrape?.contactPageFound ?? false,
-      resolvedName: resolved.bestName,
-      resolvedEmail: verifiedEmail,
-      resolvedPhone: verifiedPhone,
-      resolvedLocation: resolved.bestLocation,
-    };
-  });
-  await logVerificationStep(tenantId, candidateId, step11);
+  // ── Summary ────────────────────────────────────────────────────────────────
 
   log.info(
     {
       candidateId,
-      qualificationStatus: qualStatus,
-      finalScore,
-      emailVerified,
-      phoneVerified,
+      handle: candidate.instagramHandle,
+      qualificationStatus,
+      finalQualificationScore,
+      bioEmailVerified: state.bioEmailVerified,
+      anyEmailVerified: state.anyEmailVerified,
+      anyPhoneFound: state.anyPhoneFound,
+      totalContacts: allContacts.length,
     },
-    "Instagram enrichment pipeline complete"
+    "Instagram enrichment complete"
   );
 
   return {
     candidateId,
-    qualificationStatus: qualStatus,
-    finalScore,
+    qualificationStatus,
+    finalQualificationScore,
+    totalContacts: allContacts.length,
   };
-}
-
-// ─── Identity confidence calculator ─────────────────────────────────────────
-
-function computeIdentityConfidence(
-  hasEmail: boolean,
-  hasPhone: boolean,
-  hasWebsite: boolean,
-  hasName: boolean,
-  hasLocation: boolean
-): number {
-  let score = 0;
-  if (hasEmail) score += 30;
-  if (hasPhone) score += 25;
-  if (hasWebsite) score += 20;
-  if (hasName) score += 15;
-  if (hasLocation) score += 10;
-  return Math.min(score, 100);
 }

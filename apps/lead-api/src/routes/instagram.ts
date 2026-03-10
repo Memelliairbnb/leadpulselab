@@ -973,6 +973,167 @@ export async function instagramRoutes(app: FastifyInstance) {
     }
   });
 
+  // ─── GET /instagram/accounts/:id ────────────────────────────────────────────
+  app.get<{
+    Params: { id: string };
+  }>('/accounts/:id', async (request, reply) => {
+    const { tenantId } = request.ctx;
+    const accountId = parseInt(request.params.id, 10);
+
+    if (isNaN(accountId)) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Invalid account ID', statusCode: 400 });
+    }
+
+    try {
+      const accounts = await db
+        .select()
+        .from(instagramAccounts)
+        .where(and(eq(instagramAccounts.id, accountId), eq(instagramAccounts.tenantId, tenantId)))
+        .limit(1);
+
+      if (!accounts.length) {
+        return reply.status(404).send({ error: 'Not Found', message: 'Account not found', statusCode: 404 });
+      }
+
+      const account = accounts[0];
+
+      const [config, products, audiences, todayStats, dailyStats, recentActivity] = await Promise.all([
+        db.select().from(instagramAccountConfig).where(eq(instagramAccountConfig.accountId, accountId)).limit(1),
+        db.select().from(instagramAccountProducts).where(eq(instagramAccountProducts.accountId, accountId)),
+        db.select().from(instagramAccountAudiences).where(eq(instagramAccountAudiences.accountId, accountId)),
+        db
+          .select({ actionType: instagramEngagementLog.actionType, count: sql<number>`count(*)::int` })
+          .from(instagramEngagementLog)
+          .where(and(eq(instagramEngagementLog.accountId, accountId), sql`${instagramEngagementLog.createdAt} >= CURRENT_DATE`))
+          .groupBy(instagramEngagementLog.actionType),
+        db
+          .select({
+            date: sql<string>`DATE(${instagramEngagementLog.createdAt})::text`,
+            actionType: instagramEngagementLog.actionType,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(instagramEngagementLog)
+          .where(and(eq(instagramEngagementLog.accountId, accountId), sql`${instagramEngagementLog.createdAt} >= NOW() - INTERVAL '7 days'`))
+          .groupBy(sql`DATE(${instagramEngagementLog.createdAt})`, instagramEngagementLog.actionType)
+          .orderBy(sql`DATE(${instagramEngagementLog.createdAt})`),
+        db
+          .select()
+          .from(instagramEngagementLog)
+          .where(eq(instagramEngagementLog.accountId, accountId))
+          .orderBy(desc(instagramEngagementLog.createdAt))
+          .limit(30),
+      ]);
+
+      const statsMap: Record<string, number> = {};
+      for (const row of todayStats) statsMap[row.actionType] = row.count;
+
+      // Aggregate daily stats into per-date buckets
+      const dailyBuckets: Record<string, { date: string; follows: number; likes: number; comments: number; dms: number }> = {};
+      for (const row of dailyStats) {
+        if (!dailyBuckets[row.date]) {
+          dailyBuckets[row.date] = { date: row.date, follows: 0, likes: 0, comments: 0, dms: 0 };
+        }
+        if (row.actionType === 'follow') dailyBuckets[row.date].follows = row.count;
+        else if (row.actionType === 'like') dailyBuckets[row.date].likes = row.count;
+        else if (row.actionType === 'comment') dailyBuckets[row.date].comments = row.count;
+        else if (row.actionType === 'dm') dailyBuckets[row.date].dms = row.count;
+      }
+
+      const cfg = config[0];
+
+      return {
+        id: String(account.id),
+        username: account.igUsername,
+        fullName: account.bioText ? account.igUsername : account.igUsername,
+        profilePicUrl: account.profilePicUrl,
+        bio: account.bioText,
+        followerCount: account.followerCount ?? 0,
+        followingCount: account.followingCount ?? 0,
+        postCount: account.postCount ?? 0,
+        isBusiness: account.isBusiness ?? false,
+        category: account.businessCategory,
+        niche: account.confirmedNiche || account.detectedNiche,
+        status: account.accountStatus as 'active' | 'paused' | 'error' | 'connecting',
+        products: products.map((p) => p.productName),
+        idealCustomers: audiences.map((a) => a.audienceName),
+        engagement: {
+          autoFollow: cfg?.autoFollow ?? true,
+          autoLike: cfg?.autoLike ?? true,
+          autoComment: cfg?.autoComment ?? true,
+          autoDm: cfg?.autoDm ?? false,
+          autoContent: cfg?.autoContent ?? false,
+          dailyFollowLimit: cfg?.dailyFollowLimit ?? 10,
+          dailyLikeLimit: cfg?.dailyLikeLimit ?? 30,
+          dailyCommentLimit: cfg?.dailyCommentLimit ?? 5,
+          dailyDmLimit: cfg?.dailyDmLimit ?? 0,
+        },
+        stats: {
+          todayFollows: statsMap['follow'] || 0,
+          todayLikes: statsMap['like'] || 0,
+          todayComments: statsMap['comment'] || 0,
+          todayDms: statsMap['dm'] || 0,
+          totalLeadsScraped: 0,
+          engagementRate: 0,
+        },
+        dailyStats: Object.values(dailyBuckets),
+        recentActivity: recentActivity.map((a) => ({
+          id: String(a.id),
+          type: a.actionType as 'follow' | 'like' | 'comment' | 'dm' | 'scrape',
+          targetUsername: a.targetHandle ?? '',
+          detail: a.commentText ?? a.dmText ?? '',
+          createdAt: a.createdAt?.toISOString() ?? '',
+        })),
+        createdAt: account.createdAt?.toISOString() ?? '',
+        lastActiveAt: account.lastActiveAt?.toISOString() ?? null,
+      };
+    } catch (err) {
+      logger.error({ err, tenantId, accountId }, 'Failed to get Instagram account detail');
+      return reply.status(500).send({ error: 'Internal Server Error', message: 'Failed to retrieve account', statusCode: 500 });
+    }
+  });
+
+  // ─── PATCH /instagram/accounts/:id/status ───────────────────────────────────
+  app.patch<{
+    Params: { id: string };
+    Body: { status: 'active' | 'paused' };
+  }>('/accounts/:id/status', async (request, reply) => {
+    const { tenantId } = request.ctx;
+    const accountId = parseInt(request.params.id, 10);
+    const { status } = request.body;
+
+    if (isNaN(accountId)) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Invalid account ID', statusCode: 400 });
+    }
+
+    if (!['active', 'paused'].includes(status)) {
+      return reply.status(400).send({ error: 'Bad Request', message: 'Status must be active or paused', statusCode: 400 });
+    }
+
+    try {
+      const account = await db
+        .select({ id: instagramAccounts.id })
+        .from(instagramAccounts)
+        .where(and(eq(instagramAccounts.id, accountId), eq(instagramAccounts.tenantId, tenantId)))
+        .limit(1);
+
+      if (!account.length) {
+        return reply.status(404).send({ error: 'Not Found', message: 'Account not found', statusCode: 404 });
+      }
+
+      await db
+        .update(instagramAccounts)
+        .set({ accountStatus: status, updatedAt: new Date() })
+        .where(eq(instagramAccounts.id, accountId));
+
+      logger.info({ tenantId, accountId, status }, 'Instagram account status updated');
+
+      return { message: 'Status updated', accountId, status };
+    } catch (err) {
+      logger.error({ err, tenantId, accountId }, 'Failed to update Instagram account status');
+      return reply.status(500).send({ error: 'Internal Server Error', message: 'Failed to update status', statusCode: 500 });
+    }
+  });
+
   // ─── POST /instagram/accounts/:id/detect-niche ─────────────────────────────
   app.post<{
     Params: { id: string };
